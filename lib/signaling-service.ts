@@ -287,4 +287,3 @@ export function getSignalingService(): SignalingService {
   }
   return instance
 }
-

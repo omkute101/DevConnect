@@ -61,6 +61,7 @@
     "redis": "^5.10.0",
     "redis-server": "^1.2.2",
     "socket.io": "^4.8.1",
+    "socket.io-adapter": "latest",
     "socket.io-client": "^4.8.1",
     "sonner": "^1.7.4",
     "tailwind-merge": "^3.3.1",

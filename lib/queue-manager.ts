@@ -205,4 +205,3 @@ export async function getActiveRoomCount(): Promise<number> {
 export function updateRoomActivity(roomId: string) {
     redis.expire(keys.room(roomId), 3600)
 }
-

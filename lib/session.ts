@@ -144,4 +144,3 @@ export async function incrementReportCount(sessionId: string): Promise<number> {
 export async function getActiveSessionCount(): Promise<number> {
     return 0
 }
-

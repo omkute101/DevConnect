@@ -164,6 +164,9 @@ importers:
       socket.io:
         specifier: ^4.8.1
         version: 4.8.1
+      socket.io-adapter:
+        specifier: latest
+        version: 2.5.5
       socket.io-client:
         specifier: ^4.8.1
         version: 4.8.1
