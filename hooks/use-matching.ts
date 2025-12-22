@@ -155,9 +155,16 @@ export function useMatching(options: UseMatchingOptions = {}) {
     optionsRef.current.onPeerLeft?.()
   }, [])
 
-  // Cleanup on unmount
+  // Cleanup on unmount and page unload
   useEffect(() => {
+    const handleBeforeUnload = () => {
+      signalingRef.current.leaveQueue().catch(() => {})
+    }
+
+    window.addEventListener("beforeunload", handleBeforeUnload)
+
     return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload)
       signalingRef.current.leaveQueue().catch(() => {})
     }
   }, [])

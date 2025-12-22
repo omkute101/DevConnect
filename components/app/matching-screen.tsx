@@ -73,8 +73,11 @@ export function MatchingScreen({ mode, onlineCount, onCancel }: MatchingScreenPr
           transition={{ delay: 0.5, duration: 0.4 }}
           className="mt-10"
         >
-          <Button variant="outline" onClick={onCancel} className="gap-2 bg-red-600 text-black border-red-600 hover:bg-red-700 hover:text-black hover:border-red-700 cursor-pointer">
-            <X className="h-4 w-4" />
+          <Button 
+            onClick={onCancel} 
+            className="gap-2 bg-red-500 text-black hover:bg-red-600 hover:text-black cursor-pointer border-none"
+          >
+            <X className="h-4 w-4 text-black" />
             Cancel
           </Button>
         </motion.div>
