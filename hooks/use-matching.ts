@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react"
 import type { AppMode, ConnectionType } from "@/app/app/page"
 import { getSignalingService } from "@/lib/signaling-service"
 
-export type MatchingState = "idle" | "searching" | "matched" | "error"
+export type MatchingState = "idle" | "initializing" | "searching" | "matched" | "error"
 
 interface MatchedPeer {
   id: string
@@ -24,6 +24,7 @@ export function useMatching(options: UseMatchingOptions = {}) {
   const [currentType, setCurrentType] = useState<ConnectionType | null>(null)
   const [matchedPeer, setMatchedPeer] = useState<MatchedPeer | null>(null)
   const [onlineCount, setOnlineCount] = useState(247)
+  const [isSessionReady, setIsSessionReady] = useState(false)
 
   const signalingRef = useRef(getSignalingService())
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null)
@@ -33,6 +34,20 @@ export function useMatching(options: UseMatchingOptions = {}) {
   useEffect(() => {
     optionsRef.current = options
   }, [options])
+
+  useEffect(() => {
+    const initSession = async () => {
+      try {
+        await signalingRef.current.initSession()
+        setIsSessionReady(true)
+      } catch (error) {
+        console.error("Failed to initialize session:", error)
+        // Retry after delay
+        setTimeout(initSession, 2000)
+      }
+    }
+    initSession()
+  }, [])
 
   // Fetch online stats periodically
   useEffect(() => {
@@ -71,7 +86,6 @@ export function useMatching(options: UseMatchingOptions = {}) {
       } else if (result.type === "left") {
         // Peer left - trigger auto-skip to find next match
         if (currentMode && currentType) {
-          // Auto-search for next peer
           setState("searching")
           setMatchedPeer(null)
         }
@@ -154,6 +168,7 @@ export function useMatching(options: UseMatchingOptions = {}) {
     currentType,
     matchedPeer,
     onlineCount,
+    isSessionReady,
     startSearching,
     cancelSearch,
     skipPeer,

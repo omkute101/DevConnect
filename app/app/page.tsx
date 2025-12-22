@@ -1,18 +1,19 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect } from "react"
 import { ModeSelection } from "@/components/app/mode-selection"
 import { MatchingScreen } from "@/components/app/matching-screen"
 import { VideoRoom } from "@/components/app/video-room"
 import { AppNav } from "@/components/app/app-nav"
 import { useMatching } from "@/hooks/use-matching"
+import { motion } from "framer-motion"
 
 export type AppMode = "casual" | "pitch" | "collab" | "hiring" | "review"
 export type ConnectionType = "video" | "chat"
-export type AppState = "select" | "matching" | "connected"
+export type AppState = "loading" | "select" | "matching" | "connected"
 
 export default function AppPage() {
-  const [appState, setAppState] = useState<AppState>("select")
+  const [appState, setAppState] = useState<AppState>("loading")
 
   const onMatched = useCallback(() => {
     setAppState("connected")
@@ -22,10 +23,26 @@ export default function AppPage() {
     setAppState("select")
   }, [])
 
-  const { currentMode, currentType, matchedPeer, onlineCount, startSearching, cancelSearch, skipPeer, leaveMatch } = useMatching({
+  const {
+    currentMode,
+    currentType,
+    matchedPeer,
+    onlineCount,
+    isSessionReady,
+    startSearching,
+    cancelSearch,
+    skipPeer,
+    leaveMatch,
+  } = useMatching({
     onMatched,
     onPeerLeft,
   })
+
+  useEffect(() => {
+    if (isSessionReady && appState === "loading") {
+      setAppState("select")
+    }
+  }, [isSessionReady, appState])
 
   const handleModeSelect = useCallback(
     (mode: AppMode, type: ConnectionType) => {
@@ -49,6 +66,20 @@ export default function AppPage() {
     leaveMatch()
     setAppState("select")
   }, [leaveMatch])
+
+  if (appState === "loading") {
+    return (
+      <div className="h-full bg-background flex flex-col overflow-hidden">
+        <AppNav onLeave={() => {}} isConnected={false} />
+        <main className="flex-1 flex items-center justify-center">
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center">
+            <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
+            <p className="text-muted-foreground">Initializing...</p>
+          </motion.div>
+        </main>
+      </div>
+    )
+  }
 
   return (
     <div className="h-full bg-background flex flex-col overflow-hidden">

@@ -243,7 +243,7 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
         }
 
         if (isInitiator) {
-          await new Promise((resolve) => setTimeout(resolve, 1500))
+          await new Promise((resolve) => setTimeout(resolve, 800))
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
 

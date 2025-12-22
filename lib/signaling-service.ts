@@ -65,6 +65,7 @@ export interface WebRTCSignal {
 
 class SignalingService {
   private session: SessionData | null = null
+  private sessionPromise: Promise<SessionData> | null = null
   private onMatchCallback: ((result: MatchResult) => void) | null = null
   private onSignalCallback: ((signal: WebRTCSignal, fromId: string) => void) | null = null
   private currentRoomId: string | null = null
@@ -78,61 +79,98 @@ class SignalingService {
   private isPolling = false
 
   async initSession(): Promise<SessionData> {
-    if (this.session && this.session.expiresAt > Date.now()) {
+    // Return existing session if valid
+    if (this.session && this.session.expiresAt > Date.now() + 60000) {
       return this.session
     }
 
+    // Return existing promise if initialization is in progress
+    if (this.sessionPromise) {
+      return this.sessionPromise
+    }
+
+    // Try to load from storage first
     const stored = this.storage.getItem("omniconnect-session")
     if (stored) {
       try {
         const parsed = JSON.parse(stored) as SessionData
-        if (parsed.expiresAt > Date.now()) {
+        if (parsed.expiresAt > Date.now() + 60000) {
           this.session = parsed
           return this.session
         }
       } catch {
-        // Invalid stored data
+        // Invalid stored data, will create new session
       }
     }
 
-    // Create new anonymous session
-    const response = await fetch("/api/session/init", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    })
+    // Create new session with retry logic
+    this.sessionPromise = this.createNewSession()
 
-    const data = await response.json()
-
-    if (!data.success) {
-      throw new Error(data.error || "Failed to create session")
+    try {
+      this.session = await this.sessionPromise
+      return this.session
+    } finally {
+      this.sessionPromise = null
     }
-
-    this.session = {
-      sessionId: data.sessionId,
-      token: data.token,
-      expiresAt: Date.now() + data.expiresIn * 1000,
-    }
-
-    this.storage.setItem("omniconnect-session", JSON.stringify(this.session))
-    return this.session
   }
 
-  private getAuthHeaders(): Record<string, string> {
+  private async createNewSession(retries = 3): Promise<SessionData> {
+    let lastError: Error | null = null
+
+    for (let i = 0; i < retries; i++) {
+      try {
+        const response = await fetch("/api/session/init", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+        })
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+
+        const data = await response.json()
+
+        if (!data.success) {
+          throw new Error(data.error || "Failed to create session")
+        }
+
+        const sessionData: SessionData = {
+          sessionId: data.sessionId,
+          token: data.token,
+          expiresAt: Date.now() + data.expiresIn * 1000,
+        }
+
+        this.storage.setItem("omniconnect-session", JSON.stringify(sessionData))
+        return sessionData
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error("Unknown error")
+        // Wait before retry with exponential backoff
+        if (i < retries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)))
+        }
+      }
+    }
+
+    throw lastError || new Error("Failed to create session after retries")
+  }
+
+  private async getAuthHeaders(): Promise<Record<string, string>> {
+    const session = await this.initSession()
     return {
       "Content-Type": "application/json",
-      ...(this.session?.token ? { Authorization: `Bearer ${this.session.token}` } : {}),
+      Authorization: `Bearer ${session.token}`,
     }
   }
 
   async joinQueue(mode: AppMode, type: ConnectionType): Promise<MatchResult> {
     try {
-      await this.initSession()
+      const headers = await this.getAuthHeaders()
       this.currentMode = mode
       this.currentType = type
 
       const response = await fetch("/api/signaling", {
         method: "POST",
-        headers: this.getAuthHeaders(),
+        headers,
         body: JSON.stringify({
           action: "join-queue",
           mode,
@@ -140,32 +178,71 @@ class SignalingService {
         }),
       })
 
-      const data = await response.json()
+      if (!response.ok) {
+        // If unauthorized, clear session and retry once
+        if (response.status === 401) {
+          this.session = null
+          this.storage.removeItem("omniconnect-session")
+          const newHeaders = await this.getAuthHeaders()
+          const retryResponse = await fetch("/api/signaling", {
+            method: "POST",
+            headers: newHeaders,
+            body: JSON.stringify({
+              action: "join-queue",
+              mode,
+              type,
+            }),
+          })
 
-      if (!data.success) {
-        return { success: false, type: "error", message: data.error }
-      }
+          if (!retryResponse.ok) {
+            return { success: false, type: "error", message: "Authentication failed" }
+          }
 
-      if (data.matched) {
-        // Immediate match found
-        this.currentRoomId = data.roomId
-        this.startSignalPolling()
-        return {
-          success: true,
-          type: "matched",
-          roomId: data.roomId,
-          peerId: data.peerId,
-          isInitiator: data.isInitiator,
+          const retryData = await retryResponse.json()
+          return this.handleJoinQueueResponse(retryData, mode)
         }
+
+        return { success: false, type: "error", message: `HTTP ${response.status}` }
       }
 
-      // Start polling for match
-      this.startMatchPolling()
-      return { success: true, type: "waiting" }
+      const data = await response.json()
+      return this.handleJoinQueueResponse(data, mode)
     } catch (error) {
       console.error("Failed to join queue:", error)
       return { success: false, type: "error", message: "Failed to connect" }
     }
+  }
+
+  private handleJoinQueueResponse(
+    data: {
+      success: boolean
+      matched?: boolean
+      roomId?: string
+      peerId?: string
+      isInitiator?: boolean
+      error?: string
+    },
+    mode: AppMode,
+  ): MatchResult {
+    if (!data.success) {
+      return { success: false, type: "error", message: data.error }
+    }
+
+    if (data.matched) {
+      this.currentRoomId = data.roomId!
+      this.startSignalPolling()
+      return {
+        success: true,
+        type: "matched",
+        roomId: data.roomId,
+        peerId: data.peerId,
+        isInitiator: data.isInitiator,
+      }
+    }
+
+    // Start polling for match
+    this.startMatchPolling()
+    return { success: true, type: "waiting" }
   }
 
   private startMatchPolling() {
@@ -176,11 +253,14 @@ class SignalingService {
       if (!this.isPolling) return
 
       try {
+        const headers = await this.getAuthHeaders()
         const response = await fetch("/api/signaling", {
           method: "POST",
-          headers: this.getAuthHeaders(),
+          headers,
           body: JSON.stringify({ action: "check-match" }),
         })
+
+        if (!response.ok) return
 
         const data = await response.json()
 
@@ -200,7 +280,7 @@ class SignalingService {
       } catch (error) {
         console.error("Match poll error:", error)
       }
-    }, 1000) // Poll every second
+    }, 1000)
   }
 
   private stopMatchPolling() {
@@ -217,14 +297,17 @@ class SignalingService {
       if (!this.currentRoomId) return
 
       try {
+        const headers = await this.getAuthHeaders()
         const response = await fetch("/api/signaling", {
           method: "POST",
-          headers: this.getAuthHeaders(),
+          headers,
           body: JSON.stringify({
             action: "get-signals",
             roomId: this.currentRoomId,
           }),
         })
+
+        if (!response.ok) return
 
         const data = await response.json()
 
@@ -243,7 +326,7 @@ class SignalingService {
       } catch (error) {
         console.error("Signal poll error:", error)
       }
-    }, 300) // Poll signals more frequently for low latency
+    }, 300)
   }
 
   private stopSignalPolling() {
@@ -267,9 +350,10 @@ class SignalingService {
     this.stopSignalPolling()
 
     try {
+      const headers = await this.getAuthHeaders()
       await fetch("/api/signaling", {
         method: "POST",
-        headers: this.getAuthHeaders(),
+        headers,
         body: JSON.stringify({
           action: "leave",
           roomId: this.currentRoomId,
@@ -288,9 +372,10 @@ class SignalingService {
     this.stopSignalPolling()
 
     try {
+      const headers = await this.getAuthHeaders()
       const response = await fetch("/api/signaling", {
         method: "POST",
-        headers: this.getAuthHeaders(),
+        headers,
         body: JSON.stringify({
           action: "skip",
           roomId,
@@ -298,6 +383,10 @@ class SignalingService {
           type,
         }),
       })
+
+      if (!response.ok) {
+        return { success: false, type: "error", message: `HTTP ${response.status}` }
+      }
 
       const data = await response.json()
 
@@ -324,9 +413,10 @@ class SignalingService {
 
   async sendSignal(roomId: string, targetId: string, signal: WebRTCSignal): Promise<void> {
     try {
+      const headers = await this.getAuthHeaders()
       await fetch("/api/signaling", {
         method: "POST",
-        headers: this.getAuthHeaders(),
+        headers,
         body: JSON.stringify({
           action: "signal",
           roomId,
@@ -342,6 +432,7 @@ class SignalingService {
   async getStats(): Promise<PlatformStats | null> {
     try {
       const response = await fetch("/api/stats")
+      if (!response.ok) return null
       const data = await response.json()
       return data
     } catch {
