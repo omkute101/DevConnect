@@ -77,7 +77,7 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
             <div className="grid gap-4 sm:grid-cols-2">
               <button
                 onClick={() => handleTypeSelect("chat")}
-                className="group relative flex flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring"
+                className="group relative flex flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
               >
                 <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-secondary transition-colors group-hover:bg-foreground/20">
                   <MessageSquare className="h-8 w-8 text-foreground" />
@@ -88,7 +88,7 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
 
               <button
                 onClick={() => handleTypeSelect("video")}
-                className="group relative flex flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring"
+                className="group relative flex flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
               >
                 <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-secondary transition-colors group-hover:bg-foreground/20">
                   <Video className="h-8 w-8 text-foreground" />
@@ -113,8 +113,8 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
               >
                 Let's select an intent
               </button>
-              <h1 className="text-2xl font-bold tracking-tight md:text-4xl">What brings you here today?</h1>
-              <p className="mt-2 text-muted-foreground">Select your intent to get matched with like-minded developers</p>
+              <h1 className="text-2xl font-bold tracking-tight md:text-4xl px-2">What brings you here today?</h1>
+              <p className="mt-2 text-muted-foreground px-4 text-center break-words max-w-xs mx-auto md:max-w-none">Select your intent to get matched with like-minded developers</p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -125,7 +125,7 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05, duration: 0.4 }}
                   onClick={() => handleModeSelect(mode.id)}
-                  className="group relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5 text-left transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
+                  className="group relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5 text-left transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background cursor-pointer"
                 >
                   <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-secondary transition-colors group-hover:bg-foreground/20">
                     <mode.icon className="h-5 w-5 text-foreground" />

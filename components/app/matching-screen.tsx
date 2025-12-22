@@ -21,7 +21,7 @@ interface MatchingScreenProps {
 
 export function MatchingScreen({ mode, onlineCount, onCancel }: MatchingScreenProps) {
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] flex-col items-center justify-center px-6 py-12">
+    <div className="flex h-full flex-col items-center justify-center px-6 py-12 overflow-hidden">
       <motion.div
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
@@ -65,17 +65,7 @@ export function MatchingScreen({ mode, onlineCount, onCancel }: MatchingScreenPr
           Mode: <span className="text-foreground">{modeLabels[mode]}</span>
         </p>
 
-        <motion.div
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.3, duration: 0.4 }}
-          className="mt-3 text-sm text-muted-foreground"
-        >
-          <span className="inline-flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
-            {onlineCount} developers online in this mode
-          </span>
-        </motion.div>
+
 
         <motion.div
           initial={{ opacity: 0 }}
@@ -83,7 +73,7 @@ export function MatchingScreen({ mode, onlineCount, onCancel }: MatchingScreenPr
           transition={{ delay: 0.5, duration: 0.4 }}
           className="mt-10"
         >
-          <Button variant="outline" onClick={onCancel} className="gap-2 bg-transparent">
+          <Button variant="outline" onClick={onCancel} className="gap-2 bg-red-600 text-black border-red-600 hover:bg-red-700 hover:text-black hover:border-red-700 cursor-pointer">
             <X className="h-4 w-4" />
             Cancel
           </Button>

@@ -349,11 +349,18 @@ class SignalingService {
     this.stopMatchPolling()
     this.stopSignalPolling()
 
+    if (!this.currentRoomId) {
+      this.currentMode = null
+      this.currentType = null
+      return
+    }
+
     try {
       const headers = await this.getAuthHeaders()
       await fetch("/api/signaling", {
         method: "POST",
         headers,
+        keepalive: true,
         body: JSON.stringify({
           action: "leave",
           roomId: this.currentRoomId,

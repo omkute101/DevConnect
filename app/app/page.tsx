@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { ModeSelection } from "@/components/app/mode-selection"
 import { MatchingScreen } from "@/components/app/matching-screen"
 import { VideoRoom } from "@/components/app/video-room"
@@ -62,9 +63,11 @@ export default function AppPage() {
     skipPeer()
   }, [skipPeer])
 
-  const handleLeave = useCallback(() => {
-    leaveMatch()
-    setAppState("select")
+  const router = useRouter()
+
+  const handleLeave = useCallback(async () => {
+    await leaveMatch()
+    window.location.href = "/"
   }, [leaveMatch])
 
   if (appState === "loading") {

@@ -49,13 +49,13 @@ export function LandingHero() {
             className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row"
           >
             <Link href="/app">
-              <Button size="lg" className="h-12 gap-2 bg-foreground px-8 text-background hover:bg-foreground/90">
+              <Button size="lg" className="h-12 gap-2 bg-foreground px-8 text-background cursor-pointer hover:bg-foreground">
                 Start Connecting
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </Link>
             <Link href="#how-it-works">
-              <Button size="lg" variant="outline" className="h-12 px-8 bg-transparent">
+              <Button size="lg" variant="outline" className="h-12 px-8 bg-transparent cursor-pointer">
                 How It Works
               </Button>
             </Link>

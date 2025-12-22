@@ -16,9 +16,8 @@ export default function HomePage() {
         <span className="text-foreground font-medium tracking-tight text-lg">OmniConnect</span>
         <Link href="/app">
           <motion.button
-            whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
-            className="px-5 py-2.5 text-sm font-medium bg-foreground text-background rounded-full transition-all duration-300 hover:shadow-[0_0_30px_rgba(255,255,255,0.15)]"
+            className="px-5 py-2.5 text-sm font-medium bg-foreground text-background rounded-full transition-all duration-300 hover:opacity-90 cursor-pointer"
           >
             Start Connecting
           </motion.button>
@@ -56,18 +55,11 @@ export default function HomePage() {
           >
             <Link href="/app">
               <motion.button
-                whileHover={{ scale: 1.03, boxShadow: "0 0 50px rgba(255,255,255,0.2)" }}
                 whileTap={{ scale: 0.97 }}
                 transition={{ duration: 0.3 }}
-                className="group relative px-10 py-4 text-base md:text-lg font-medium bg-foreground text-background rounded-full overflow-hidden transition-all duration-500"
+                className="group relative px-10 py-4 text-base md:text-lg font-medium bg-foreground text-background rounded-full overflow-hidden transition-all duration-500 hover:opacity-90 cursor-pointer"
               >
                 <span className="relative z-10">Start Connecting</span>
-                <motion.div
-                  className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0"
-                  initial={{ x: "-100%" }}
-                  whileHover={{ x: "100%" }}
-                  transition={{ duration: 0.6, ease: "easeInOut" }}
-                />
               </motion.button>
             </Link>
           </motion.div>
