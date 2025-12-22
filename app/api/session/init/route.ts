@@ -26,8 +26,7 @@ export async function POST(request: Request) {
       )
     }
 
-    // Create anonymous session
-    const session = createSession()
+    const session = await createSession()
 
     // Generate JWT token
     const token = createSessionToken(session.sessionId)

@@ -87,7 +87,7 @@ export function generateSessionId(): string {
 export async function createSession(): Promise<Session> {
   const sessionId = generateSessionId()
   const now = Date.now()
-  
+
   const session: Session = {
     sessionId,
     socketId: null,
@@ -99,7 +99,7 @@ export async function createSession(): Promise<Session> {
 
   // Store in Redis with TTL
   await redis.set(`session:${sessionId}`, JSON.stringify(session), "EX", SESSION_TTL)
-  
+
   return session
 }
 
@@ -108,11 +108,11 @@ export async function getSession(sessionId: string): Promise<Session | null> {
   if (!data) return null
 
   const session = JSON.parse(data) as Session
-  
+
   // Update lastSeen and refresh TTL
   session.lastSeen = Date.now()
   await redis.set(`session:${sessionId}`, JSON.stringify(session), "EX", SESSION_TTL)
-  
+
   return session
 }
 
@@ -121,7 +121,7 @@ export async function updateSession(sessionId: string, updates: Partial<Session>
   if (!session) return null
 
   Object.assign(session, updates, { lastSeen: Date.now() })
-  
+
   await redis.set(`session:${sessionId}`, JSON.stringify(session), "EX", SESSION_TTL)
   return session
 }
@@ -137,10 +137,32 @@ export async function incrementReportCount(sessionId: string): Promise<number> {
 
   session.reportCount += 1
   await redis.set(`session:${sessionId}`, JSON.stringify(session), "EX", SESSION_TTL)
-  
+
   return session.reportCount
 }
 
+export async function verifySession(token: string): Promise<SessionPayload | null> {
+  const payload = verifySessionToken(token)
+  if (!payload) return null
+
+  // Verify session exists in Redis
+  const session = await getSession(payload.sessionId)
+  if (!session) return null
+
+  return payload
+}
+
 export async function getActiveSessionCount(): Promise<number> {
-    return 0
+  // Count active heartbeats (sessions active in last 30 seconds)
+  const keys = await redis.keys("heartbeat:*")
+  let activeCount = 0
+
+  for (const key of keys) {
+    const heartbeat = await redis.get(key)
+    if (heartbeat && Date.now() - Number.parseInt(heartbeat) < 30000) {
+      activeCount++
+    }
+  }
+
+  return activeCount
 }

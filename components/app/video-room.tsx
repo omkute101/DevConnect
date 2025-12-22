@@ -1,7 +1,6 @@
 "use client"
 
 import type React from "react"
-
 import { useState, useRef, useEffect, useCallback } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { Button } from "@/components/ui/button"
@@ -22,7 +21,6 @@ import {
 import { Input } from "@/components/ui/input"
 import type { AppMode, ConnectionType } from "@/app/app/page"
 import { SharePanel } from "@/components/app/share-panel"
-import { PeerProfileCard } from "@/components/app/peer-profile-card"
 import { ReportModal } from "@/components/app/report-modal"
 import { ConnectionQuality } from "@/components/app/connection-quality"
 import { AutoDisconnectWarning } from "@/components/app/auto-disconnect-warning"
@@ -57,7 +55,7 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [isVideoEnabled, setIsVideoEnabled] = useState(type === "video")
   const [isAudioEnabled, setIsAudioEnabled] = useState(type === "video")
-  const [isChatOpen, setIsChatOpen] = useState(type === "chat") // Default open for chat-only
+  const [isChatOpen, setIsChatOpen] = useState(type === "chat")
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isReportOpen, setIsReportOpen] = useState(false)
   const [message, setMessage] = useState("")
@@ -84,27 +82,22 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
     const handleSignal = async (signal: WebRTCSignal, fromId: string) => {
       const pc = peerConnectionRef.current
       if (!pc) {
-        console.log("[v0] No peer connection, queuing signal:", signal.type)
         return
       }
 
       try {
         if (signal.type === "offer") {
-          console.log("[v0] Received offer, signalingState:", pc.signalingState)
           if (pc.signalingState !== "stable") {
-            console.log("[v0] Ignoring offer, not in stable state")
             return
           }
 
           await pc.setRemoteDescription(new RTCSessionDescription(signal.payload as RTCSessionDescriptionInit))
 
-          // Process any pending ICE candidates
           for (const candidate of pendingCandidatesRef.current) {
             await pc.addIceCandidate(new RTCIceCandidate(candidate))
           }
           pendingCandidatesRef.current = []
 
-          // Create and send answer
           const answer = await pc.createAnswer()
           await pc.setLocalDescription(answer)
 
@@ -112,34 +105,27 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
             type: "answer",
             payload: answer,
           })
-          console.log("[v0] Sent answer")
         } else if (signal.type === "answer") {
-          console.log("[v0] Received answer, signalingState:", pc.signalingState)
           if (pc.signalingState !== "have-local-offer") {
-            console.log("[v0] Ignoring answer, not in have-local-offer state")
             return
           }
 
           await pc.setRemoteDescription(new RTCSessionDescription(signal.payload as RTCSessionDescriptionInit))
 
-          // Process any pending ICE candidates
           for (const candidate of pendingCandidatesRef.current) {
             await pc.addIceCandidate(new RTCIceCandidate(candidate))
           }
           pendingCandidatesRef.current = []
-          console.log("[v0] Set answer as remote description")
         } else if (signal.type === "ice-candidate") {
           const candidate = signal.payload as RTCIceCandidateInit
           if (pc.remoteDescription && pc.remoteDescription.type) {
             await pc.addIceCandidate(new RTCIceCandidate(candidate))
-            console.log("[v0] Added ICE candidate")
           } else {
-            console.log("[v0] Queueing ICE candidate")
             pendingCandidatesRef.current.push(candidate)
           }
         }
       } catch (error) {
-        console.error("[v0] Error handling signal:", error)
+        console.error("Error handling signal:", error)
       }
     }
 
@@ -158,36 +144,31 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
     isInitializedRef.current = true
 
     const initConnection = async () => {
-      console.log("[v0] Initializing connection, isInitiator:", isInitiator, "roomId:", roomId, "peerId:", peerId)
       setConnectionState("connecting")
 
       try {
         let stream: MediaStream | null = null
-        
-        // Only get local stream if using video
-        if (type === "video") {
-            stream = await getLocalStream()
-            setLocalStream(stream)
 
-            if (localVideoRef.current) {
-                localVideoRef.current.srcObject = stream
-            }
+        if (type === "video") {
+          stream = await getLocalStream()
+          setLocalStream(stream)
+
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream
+          }
         }
 
         const signaling = getSignalingService()
 
-        // Create peer connection
         const pc = createPeerConnection(
           rtcConfig,
           async (candidate) => {
-            console.log("[v0] Sending ICE candidate")
             await signaling.sendSignal(roomId, peerId, {
               type: "ice-candidate",
               payload: candidate.toJSON(),
             })
           },
           (remoteMediaStream) => {
-            console.log("[v0] Received remote stream, tracks:", remoteMediaStream.getTracks().length)
             setRemoteStream(remoteMediaStream)
             if (remoteVideoRef.current) {
               remoteVideoRef.current.srcObject = remoteMediaStream
@@ -197,59 +178,52 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
 
         peerConnectionRef.current = pc
 
-        // Add local tracks if video mode
         if (stream) {
-            stream.getTracks().forEach((track) => {
-                console.log("[v0] Adding local track:", track.kind)
-                pc.addTrack(track, stream!)
-            })
+          stream.getTracks().forEach((track) => {
+            pc.addTrack(track, stream!)
+          })
         }
 
-        // Set up data channel
         const setupDataChannel = (channel: RTCDataChannel) => {
           channel.onopen = () => {
-            console.log("[v0] Data channel opened")
-          }
-          channel.onmessage = (event) => {
-            handleIncomingMessage(event.data)
-          }
-          channel.onclose = () => {
-            console.log("[v0] Data channel closed")
-          }
-          channel.onerror = (error) => {
-            console.error("[v0] Data channel error:", error)
-          }
-        }
-
-        if (isInitiator) {
-          console.log("[v0] Creating data channel (initiator)")
-          const dc = pc.createDataChannel("chat", { ordered: true })
-          setupDataChannel(dc)
-          dataChannelRef.current = dc
-        } else {
-          pc.ondatachannel = (event) => {
-            console.log("[v0] Received data channel")
-            setupDataChannel(event.channel)
-            dataChannelRef.current = event.channel
-          }
-        }
-
-        // Monitor connection state
-        pc.onconnectionstatechange = () => {
-          const state = pc.connectionState
-          console.log("[v0] Connection state:", state)
-
-          if (state === "connected") {
             setConnectionState("connected")
             setMessages([
               {
                 id: "welcome",
                 sender: "system",
-                text: `Connected! You're now chatting in ${mode} mode (${type === "chat" ? "Chat Only" : "Video"}).`,
+                text: `Connected! You're chatting in ${mode} mode.`,
                 timestamp: new Date(),
                 type: "text",
               },
             ])
+          }
+          channel.onmessage = (event) => {
+            handleIncomingMessage(event.data)
+          }
+          channel.onclose = () => {
+            // Data channel closed - peer may have left
+          }
+          channel.onerror = (error) => {
+            console.error("Data channel error:", error)
+          }
+        }
+
+        if (isInitiator) {
+          const dc = pc.createDataChannel("chat", { ordered: true })
+          setupDataChannel(dc)
+          dataChannelRef.current = dc
+        } else {
+          pc.ondatachannel = (event) => {
+            setupDataChannel(event.channel)
+            dataChannelRef.current = event.channel
+          }
+        }
+
+        pc.onconnectionstatechange = () => {
+          const state = pc.connectionState
+
+          if (state === "connected") {
+            setConnectionState("connected")
             setShowDisconnectWarning(false)
           } else if (state === "disconnected") {
             setConnectionState("disconnected")
@@ -263,16 +237,13 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
         }
 
         pc.oniceconnectionstatechange = () => {
-          console.log("[v0] ICE connection state:", pc.iceConnectionState)
           if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
             setConnectionState("connected")
           }
         }
 
-        // This ensures the non-initiator has time to set up polling
         if (isInitiator) {
-          await new Promise((resolve) => setTimeout(resolve, 1000))
-          console.log("[v0] Creating offer")
+          await new Promise((resolve) => setTimeout(resolve, 1500))
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
 
@@ -280,10 +251,9 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
             type: "offer",
             payload: offer,
           })
-          console.log("[v0] Sent offer")
         }
       } catch (error) {
-        console.error("[v0] Failed to initialize:", error)
+        console.error("Failed to initialize:", error)
         setConnectionState("failed")
       }
     }
@@ -298,15 +268,13 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
   useEffect(() => {
     return () => {
       if (isCleaningUpRef.current) {
-        console.log("[v0] Cleaning up connection")
         dataChannelRef.current?.close()
         peerConnectionRef.current?.close()
         localStream?.getTracks().forEach((track) => track.stop())
       }
     }
-  }, [])
+  }, [localStream])
 
-  // Handle incoming messages
   const handleIncomingMessage = (msg: string) => {
     try {
       const data = JSON.parse(msg)
@@ -341,7 +309,6 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
     ])
   }
 
-  // Update local video element when stream changes
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       if (localVideoRef.current.srcObject !== localStream) {
@@ -351,19 +318,15 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
     }
   }, [localStream])
 
-  // Update remote video element when stream changes
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
       if (remoteVideoRef.current.srcObject !== remoteStream) {
         remoteVideoRef.current.srcObject = remoteStream
-        remoteVideoRef.current.play().catch((e) => {
-          console.log("[v0] Remote video play error:", e)
-        })
+        remoteVideoRef.current.play().catch(() => {})
       }
     }
   }, [remoteStream])
 
-  // Scroll chat to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
@@ -392,12 +355,10 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
       dc.send(text)
       return true
     }
-    console.log("[v0] Cannot send, data channel state:", dc?.readyState)
     return false
   }, [])
 
   const closeConnection = useCallback(() => {
-    console.log("[v0] Closing connection")
     dataChannelRef.current?.close()
     peerConnectionRef.current?.close()
     peerConnectionRef.current = null
@@ -498,80 +459,77 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
     )
   }
 
-  // Adjust UI for Chat Only mode
+  // Chat Only Mode UI
   if (type === "chat") {
-      return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col justify-center max-w-4xl mx-auto w-full">
-      {/* Main chat area */}
-      <div className="relative flex-1 bg-card border rounded-xl overflow-hidden shadow-lg flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between border-b p-4 bg-muted/20">
+    return (
+      <div className="flex h-[calc(100vh-4rem)] flex-col justify-center max-w-4xl mx-auto w-full p-4">
+        <div className="relative flex-1 bg-card border rounded-xl overflow-hidden shadow-lg flex flex-col">
+          <div className="flex items-center justify-between border-b p-4 bg-muted/20">
             <div className="flex items-center gap-2">
-                <div className={`h-3 w-3 rounded-full ${connectionState === "connected" ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`} />
-                <span className="font-semibold">Anonymous Developer ({mode})</span>
+              <div
+                className={`h-3 w-3 rounded-full ${connectionState === "connected" ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`}
+              />
+              <span className="font-semibold">Anonymous Developer ({mode})</span>
             </div>
-            
-            <div className="flex items-center gap-2">
-                 <Button variant="secondary" size="sm" onClick={handleSkip} className="gap-2">
-                    <SkipForward className="h-4 w-4" /> Next
-                 </Button>
-                 <Button variant="destructive" size="sm" onClick={handleLeave} className="gap-2">
-                    <PhoneOff className="h-4 w-4" /> Leave
-                 </Button>
-            </div>
-        </div>
 
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="sm" onClick={handleSkip} className="gap-2">
+                <SkipForward className="h-4 w-4" /> Next
+              </Button>
+              <Button variant="destructive" size="sm" onClick={handleLeave} className="gap-2">
+                <PhoneOff className="h-4 w-4" /> Leave
+              </Button>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {messages.length === 0 && (
+              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                <p>{connectionState === "connected" ? "Say hello!" : "Connecting..."}</p>
+              </div>
+            )}
             {messages.map(renderMessage)}
             <div ref={chatEndRef} />
-        </div>
-
-        {/* Input */}
-        <form onSubmit={handleSendMessage} className="border-t p-4 bg-muted/10">
-          <div className="flex gap-2">
-            <Input
-              value={message}
-              onChange={(e) => setMessage(e.target.value)}
-              placeholder="Type a message..."
-              className="flex-1"
-              disabled={connectionState !== "connected"}
-              autoFocus
-            />
-            <Button
-              type="submit"
-              size="icon"
-              disabled={connectionState !== "connected"}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
           </div>
-        </form>
 
-        {/* Overlays like Report Modal */}
-        <ReportModal
+          <form onSubmit={handleSendMessage} className="border-t p-4 bg-muted/10">
+            <div className="flex gap-2">
+              <Input
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                placeholder={connectionState === "connected" ? "Type a message..." : "Connecting..."}
+                className="flex-1"
+                disabled={connectionState !== "connected"}
+                autoFocus
+              />
+              <Button type="submit" size="icon" disabled={connectionState !== "connected"}>
+                <Send className="h-4 w-4" />
+              </Button>
+            </div>
+          </form>
+
+          <ReportModal
             isOpen={isReportOpen}
             onClose={() => setIsReportOpen(false)}
             peerId={peerId}
             roomId={roomId}
             onAutoDisconnect={handleReportAutoDisconnect}
-        />
-        <AutoDisconnectWarning
+          />
+          <AutoDisconnectWarning
             isVisible={showDisconnectWarning}
             reason={disconnectReason}
             onStay={() => setShowDisconnectWarning(false)}
             onLeave={handleLeave}
-        />
+          />
+        </div>
       </div>
-    </div>
-      )
+    )
   }
 
+  // Video + Chat Mode UI
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col lg:flex-row">
-      {/* Main video area */}
       <div className="relative flex-1 bg-card">
-        {/* Remote video (full screen) */}
         <div className="relative h-full w-full overflow-hidden bg-secondary">
           <video
             ref={remoteVideoRef}
@@ -582,7 +540,6 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
             poster="/developer-video-call-dark-background.jpg"
           />
 
-          {/* Connection status overlay */}
           {connectionState !== "connected" && (
             <div className="absolute inset-0 flex items-center justify-center bg-secondary/80">
               <div className="text-center">
@@ -594,12 +551,10 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
             </div>
           )}
 
-          {/* Connection quality indicator */}
           <div className="absolute top-6 right-6">
             {connectionState !== "idle" && <ConnectionQuality connectionState={connectionState} />}
           </div>
 
-          {/* Auto disconnect warning */}
           <AutoDisconnectWarning
             isVisible={showDisconnectWarning}
             reason={disconnectReason}
@@ -607,7 +562,6 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
             onLeave={handleLeave}
           />
 
-          {/* Peer info overlay */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -633,6 +587,13 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
               <AlertTriangle className="h-4 w-4 text-muted-foreground" />
             </Button>
           </motion.div>
+
+          {/* Local video preview */}
+          {type === "video" && localStream && (
+            <div className="absolute bottom-24 right-6 h-32 w-48 overflow-hidden rounded-xl border border-border bg-secondary shadow-lg">
+              <video ref={localVideoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
+            </div>
+          )}
         </div>
       </div>
 
@@ -650,7 +611,6 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
           </Button>
         </div>
 
-        {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4">
           <div className="space-y-4">
             {messages.length === 0 ? (
@@ -664,7 +624,6 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
           </div>
         </div>
 
-        {/* Message input */}
         <form onSubmit={handleSendMessage} className="border-t border-border p-4">
           <div className="flex gap-2">
             <Input
@@ -732,10 +691,7 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
         )}
       </AnimatePresence>
 
-      {/* Share panel */}
       <SharePanel isOpen={isShareOpen} onClose={() => setIsShareOpen(false)} onShare={handleShareProfile} />
-
-      {/* Report modal */}
       <ReportModal
         isOpen={isReportOpen}
         onClose={() => setIsReportOpen(false)}
@@ -743,60 +699,60 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
         roomId={roomId}
         onAutoDisconnect={handleReportAutoDisconnect}
       />
-      
-       {/* Controls bar */}
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.2 }}
-          className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-3 border-t border-border bg-background/80 p-4 backdrop-blur-xl"
+
+      {/* Controls bar */}
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.2 }}
+        className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-3 border-t border-border bg-background/80 p-4 backdrop-blur-xl lg:left-0 lg:right-96"
+      >
+        <Button
+          variant={isAudioEnabled ? "secondary" : "destructive"}
+          size="lg"
+          onClick={toggleAudio}
+          className="h-12 w-12 rounded-full p-0"
         >
-          <Button
-            variant={isAudioEnabled ? "secondary" : "destructive"}
-            size="lg"
-            onClick={toggleAudio}
-            className="h-12 w-12 rounded-full p-0"
-          >
-            {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
-          </Button>
+          {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+        </Button>
 
-          <Button
-            variant={isVideoEnabled ? "secondary" : "destructive"}
-            size="lg"
-            onClick={toggleVideo}
-            className="h-12 w-12 rounded-full p-0"
-          >
-            {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
-          </Button>
+        <Button
+          variant={isVideoEnabled ? "secondary" : "destructive"}
+          size="lg"
+          onClick={toggleVideo}
+          className="h-12 w-12 rounded-full p-0"
+        >
+          {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+        </Button>
 
-          <Button variant="secondary" size="lg" onClick={handleSkip} className="h-12 gap-2 rounded-full px-6">
-            <SkipForward className="h-5 w-5" />
-            <span className="hidden sm:inline">Next</span>
-          </Button>
+        <Button variant="secondary" size="lg" onClick={handleSkip} className="h-12 gap-2 rounded-full px-6">
+          <SkipForward className="h-5 w-5" />
+          <span className="hidden sm:inline">Next</span>
+        </Button>
 
-          <Button
-            variant="secondary"
-            size="lg"
-            onClick={() => setIsShareOpen(!isShareOpen)}
-            className="h-12 w-12 rounded-full p-0"
-          >
-            <Share2 className="h-5 w-5" />
-          </Button>
+        <Button
+          variant="secondary"
+          size="lg"
+          onClick={() => setIsShareOpen(!isShareOpen)}
+          className="h-12 w-12 rounded-full p-0"
+        >
+          <Share2 className="h-5 w-5" />
+        </Button>
 
-          <Button
-            variant="secondary"
-            size="lg"
-            onClick={() => setIsChatOpen(!isChatOpen)}
-            className="h-12 w-12 rounded-full p-0 lg:hidden"
-          >
-            <MessageSquare className="h-5 w-5" />
-          </Button>
+        <Button
+          variant="secondary"
+          size="lg"
+          onClick={() => setIsChatOpen(!isChatOpen)}
+          className="h-12 w-12 rounded-full p-0 lg:hidden"
+        >
+          <MessageSquare className="h-5 w-5" />
+        </Button>
 
-          <Button variant="destructive" size="lg" onClick={handleLeave} className="h-12 gap-2 rounded-full px-6">
-            <PhoneOff className="h-5 w-5" />
-            <span className="hidden sm:inline">Leave</span>
-          </Button>
-        </motion.div>
+        <Button variant="destructive" size="lg" onClick={handleLeave} className="h-12 gap-2 rounded-full px-6">
+          <PhoneOff className="h-5 w-5" />
+          <span className="hidden sm:inline">Leave</span>
+        </Button>
+      </motion.div>
     </div>
   )
 }

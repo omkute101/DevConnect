@@ -27,6 +27,12 @@ export function useMatching(options: UseMatchingOptions = {}) {
 
   const signalingRef = useRef(getSignalingService())
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const optionsRef = useRef(options)
+
+  // Keep options ref updated
+  useEffect(() => {
+    optionsRef.current = options
+  }, [options])
 
   // Fetch online stats periodically
   useEffect(() => {
@@ -47,9 +53,11 @@ export function useMatching(options: UseMatchingOptions = {}) {
     }
   }, [])
 
-  // Set up match callback
+  // Set up match and peer-left callbacks
   useEffect(() => {
-    signalingRef.current.onMatch((result) => {
+    const signaling = signalingRef.current
+
+    signaling.onMatch((result) => {
       if (result.type === "matched" && result.peerId && result.roomId && currentMode) {
         const peer: MatchedPeer = {
           id: result.peerId,
@@ -59,36 +67,40 @@ export function useMatching(options: UseMatchingOptions = {}) {
         }
         setMatchedPeer(peer)
         setState("matched")
-        options.onMatched?.(peer)
+        optionsRef.current.onMatched?.(peer)
+      } else if (result.type === "left") {
+        // Peer left - trigger auto-skip to find next match
+        if (currentMode && currentType) {
+          // Auto-search for next peer
+          setState("searching")
+          setMatchedPeer(null)
+        }
       }
     })
-  }, [currentMode, options])
+  }, [currentMode, currentType])
 
-  const startSearching = useCallback(
-    async (mode: AppMode, type: ConnectionType) => {
-      setState("searching")
-      setCurrentMode(mode)
-      setCurrentType(type)
+  const startSearching = useCallback(async (mode: AppMode, type: ConnectionType) => {
+    setState("searching")
+    setCurrentMode(mode)
+    setCurrentType(type)
 
-      const result = await signalingRef.current.joinQueue(mode, type)
+    const result = await signalingRef.current.joinQueue(mode, type)
 
-      if (result.type === "matched" && result.peerId && result.roomId) {
-        const peer: MatchedPeer = {
-          id: result.peerId,
-          roomId: result.roomId,
-          mode,
-          isInitiator: result.isInitiator ?? false,
-        }
-        setMatchedPeer(peer)
-        setState("matched")
-        options.onMatched?.(peer)
-      } else if (result.type === "error") {
-        setState("error")
+    if (result.type === "matched" && result.peerId && result.roomId) {
+      const peer: MatchedPeer = {
+        id: result.peerId,
+        roomId: result.roomId,
+        mode,
+        isInitiator: result.isInitiator ?? false,
       }
-      // If waiting, the callback will handle when match is found
-    },
-    [options],
-  )
+      setMatchedPeer(peer)
+      setState("matched")
+      optionsRef.current.onMatched?.(peer)
+    } else if (result.type === "error") {
+      setState("error")
+    }
+    // If waiting, the callback will handle when match is found
+  }, [])
 
   const cancelSearch = useCallback(async () => {
     await signalingRef.current.leaveQueue()
@@ -114,23 +126,24 @@ export function useMatching(options: UseMatchingOptions = {}) {
         }
         setMatchedPeer(peer)
         setState("matched")
-        options.onMatched?.(peer)
+        optionsRef.current.onMatched?.(peer)
       }
+      // If not immediately matched, polling will continue
     }
-  }, [currentMode, currentType, matchedPeer?.roomId, options])
+  }, [currentMode, currentType, matchedPeer?.roomId])
 
   const leaveMatch = useCallback(async () => {
-    await cancelSearch()
-    options.onPeerLeft?.()
-  }, [cancelSearch, options])
+    await signalingRef.current.leaveQueue()
+    setState("idle")
+    setCurrentMode(null)
+    setCurrentType(null)
+    setMatchedPeer(null)
+    optionsRef.current.onPeerLeft?.()
+  }, [])
 
   // Cleanup on unmount
   useEffect(() => {
-    console.log("[useMatching] Mounted")
     return () => {
-      console.log("[useMatching] Unmounted")
-      // Don't destroy the singleton service as it may be reused
-      // Just ensure we leave any active queue
       signalingRef.current.leaveQueue().catch(() => {})
     }
   }, [])
