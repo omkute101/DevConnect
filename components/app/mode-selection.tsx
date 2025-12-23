@@ -2,8 +2,8 @@
 
 import { useState } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { MessageCircle, Rocket, Users, Briefcase, Code, Video, MessageSquare } from "lucide-react"
-import type { AppMode, ConnectionType } from "@/app/app/page"
+import { MessageCircle, Rocket, Users, Code, Video, MessageSquare, UserSearch, Laptop } from "lucide-react"
+import type { AppMode, ConnectionType, MediaPermissions } from "@/app/app/page"
 
 const modes = [
   {
@@ -25,10 +25,16 @@ const modes = [
     description: "Connect with developers ready to build",
   },
   {
-    id: "hiring" as AppMode,
-    icon: Briefcase,
-    title: "Hiring / Freelance",
-    description: "Find opportunities or talent",
+    id: "hire" as AppMode,
+    icon: UserSearch,
+    title: "Hire Someone",
+    description: "Find talented developers for your project",
+  },
+  {
+    id: "freelance" as AppMode,
+    icon: Laptop,
+    title: "Freelance",
+    description: "Get matched with clients looking to hire",
   },
   {
     id: "review" as AppMode,
@@ -39,21 +45,53 @@ const modes = [
 ]
 
 interface ModeSelectionProps {
-  onSelect: (mode: AppMode, type: ConnectionType) => void
+  onSelect: (mode: AppMode, type: ConnectionType, permissions?: MediaPermissions) => void
 }
 
 export function ModeSelection({ onSelect }: ModeSelectionProps) {
   const [step, setStep] = useState<"type" | "mode">("type")
   const [selectedType, setSelectedType] = useState<ConnectionType | null>(null)
+  const [isRequestingPermissions, setIsRequestingPermissions] = useState(false)
 
-  const handleTypeSelect = (type: ConnectionType) => {
-    setSelectedType(type)
-    setStep("mode")
+  const handleTypeSelect = async (type: ConnectionType) => {
+    if (type === "video") {
+      setIsRequestingPermissions(true)
+      try {
+        // Request permissions before proceeding
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+        // Stop tracks immediately - we just wanted to get permission
+        stream.getTracks().forEach((track) => track.stop())
+        setSelectedType(type)
+        setStep("mode")
+      } catch (error) {
+        // Permission denied or error - still proceed but mark as denied
+        console.log("Media permission denied or error:", error)
+        setSelectedType(type)
+        setStep("mode")
+      } finally {
+        setIsRequestingPermissions(false)
+      }
+    } else {
+      setSelectedType(type)
+      setStep("mode")
+    }
   }
 
-  const handleModeSelect = (mode: AppMode) => {
+  const handleModeSelect = async (mode: AppMode) => {
     if (selectedType) {
-      onSelect(mode, selectedType)
+      let permissions: MediaPermissions | undefined
+
+      if (selectedType === "video") {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+          stream.getTracks().forEach((track) => track.stop())
+          permissions = { video: true, audio: true, denied: false }
+        } catch {
+          permissions = { video: false, audio: false, denied: true }
+        }
+      }
+
+      onSelect(mode, selectedType, permissions)
     }
   }
 
@@ -69,7 +107,7 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
             transition={{ duration: 0.3 }}
             className="w-full max-w-2xl"
           >
-             <div className="mb-8 text-center">
+            <div className="mb-8 text-center">
               <h1 className="text-2xl font-bold tracking-tight md:text-3xl">How do you want to connect?</h1>
               <p className="mt-2 text-muted-foreground">Choose your preferred communication style</p>
             </div>
@@ -77,7 +115,8 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
             <div className="grid gap-4 sm:grid-cols-2">
               <button
                 onClick={() => handleTypeSelect("chat")}
-                className="group relative flex flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
+                disabled={isRequestingPermissions}
+                className="group relative flex flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
               >
                 <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-secondary transition-colors group-hover:bg-foreground/20">
                   <MessageSquare className="h-8 w-8 text-foreground" />
@@ -88,13 +127,24 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
 
               <button
                 onClick={() => handleTypeSelect("video")}
-                className="group relative flex flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring cursor-pointer"
+                disabled={isRequestingPermissions}
+                className="group relative flex flex-col items-center justify-center rounded-xl border border-border bg-card p-8 text-center transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
               >
-                <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-secondary transition-colors group-hover:bg-foreground/20">
-                  <Video className="h-8 w-8 text-foreground" />
-                </div>
+                {isRequestingPermissions ? (
+                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-secondary">
+                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
+                  </div>
+                ) : (
+                  <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-secondary transition-colors group-hover:bg-foreground/20">
+                    <Video className="h-8 w-8 text-foreground" />
+                  </div>
+                )}
                 <h3 className="mb-2 text-lg font-semibold">Video + Chat</h3>
-                <p className="text-sm text-muted-foreground">Face-to-face conversations for deeper connection</p>
+                <p className="text-sm text-muted-foreground">
+                  {isRequestingPermissions
+                    ? "Requesting camera access..."
+                    : "Face-to-face conversations for deeper connection"}
+                </p>
               </button>
             </div>
           </motion.div>
@@ -107,14 +157,16 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
             className="w-full max-w-4xl"
           >
             <div className="mb-8 text-center">
-              <button 
+              <button
                 onClick={() => setStep("type")}
                 className="mb-4 text-sm text-muted-foreground hover:text-foreground hover:underline"
               >
-                Let's select an intent
+                ← Back to connection type
               </button>
               <h1 className="text-2xl font-bold tracking-tight md:text-4xl px-2">What brings you here today?</h1>
-              <p className="mt-2 text-muted-foreground px-4 text-center break-words max-w-xs mx-auto md:max-w-none">Select your intent to get matched with like-minded developers</p>
+              <p className="mt-2 text-muted-foreground px-4 text-center break-words max-w-xs mx-auto md:max-w-none">
+                Select your intent to get matched with like-minded developers
+              </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -125,14 +177,14 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05, duration: 0.4 }}
                   onClick={() => handleModeSelect(mode.id)}
-                  className="group relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5 text-left transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background cursor-pointer"
+                  className="group relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5 text-left transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
                 >
                   <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-secondary transition-colors group-hover:bg-foreground/20">
                     <mode.icon className="h-5 w-5 text-foreground" />
                   </div>
                   <h3 className="mb-1 text-base font-semibold">{mode.title}</h3>
                   <p className="text-xs text-muted-foreground">{mode.description}</p>
-                  
+
                   <div className="absolute inset-0 -z-10 bg-gradient-to-br from-foreground/5 to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
                 </motion.button>
               ))}

@@ -17,16 +17,17 @@ import {
   Share2,
   User,
   AlertTriangle,
+  SwitchCamera,
 } from "lucide-react"
 import { Input } from "@/components/ui/input"
-import type { AppMode, ConnectionType } from "@/app/app/page"
+import type { AppMode, ConnectionType, MediaPermissions } from "@/app/app/page"
 import { SharePanel } from "@/components/app/share-panel"
 import { ReportModal } from "@/components/app/report-modal"
 import { ConnectionQuality } from "@/components/app/connection-quality"
 import { AutoDisconnectWarning } from "@/components/app/auto-disconnect-warning"
 import type { DeveloperProfile } from "@/lib/developer-profile"
 import { getSignalingService, type WebRTCSignal } from "@/lib/signaling-service"
-import { rtcConfig, getLocalStream, createPeerConnection } from "@/lib/webrtc"
+import { rtcConfig, createPeerConnection } from "@/lib/webrtc"
 
 type ConnectionState = "idle" | "connecting" | "connected" | "disconnected" | "failed"
 
@@ -38,6 +39,7 @@ interface VideoRoomProps {
   isInitiator: boolean
   onSkip: () => void
   onLeave: () => void
+  initialPermissions?: MediaPermissions | null
 }
 
 interface ChatMessage {
@@ -49,12 +51,21 @@ interface ChatMessage {
   profile?: DeveloperProfile
 }
 
-export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onLeave }: VideoRoomProps) {
+export function VideoRoom({
+  mode,
+  type,
+  peerId,
+  roomId,
+  isInitiator,
+  onSkip,
+  onLeave,
+  initialPermissions,
+}: VideoRoomProps) {
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle")
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
-  const [isVideoEnabled, setIsVideoEnabled] = useState(type === "video")
-  const [isAudioEnabled, setIsAudioEnabled] = useState(type === "video")
+  const [isVideoEnabled, setIsVideoEnabled] = useState(type === "video" && !initialPermissions?.denied)
+  const [isAudioEnabled, setIsAudioEnabled] = useState(type === "video" && !initialPermissions?.denied)
   const [isChatOpen, setIsChatOpen] = useState(type === "chat")
   const [isShareOpen, setIsShareOpen] = useState(false)
   const [isReportOpen, setIsReportOpen] = useState(false)
@@ -64,6 +75,8 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
   const [showPeerProfile, setShowPeerProfile] = useState(false)
   const [showDisconnectWarning, setShowDisconnectWarning] = useState(false)
   const [disconnectReason, setDisconnectReason] = useState("")
+  const [isFrontCamera, setIsFrontCamera] = useState(true)
+  const [permissionsDenied, setPermissionsDenied] = useState(initialPermissions?.denied ?? false)
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
@@ -74,6 +87,120 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([])
   const isInitializedRef = useRef(false)
   const isCleaningUpRef = useRef(false)
+
+  const getLocalStream = useCallback(async (useFrontCamera = true): Promise<MediaStream | null> => {
+    try {
+      const constraints: MediaStreamConstraints = {
+        video: {
+          facingMode: useFrontCamera ? "user" : "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      }
+      const stream = await navigator.mediaDevices.getUserMedia(constraints)
+      setPermissionsDenied(false)
+      return stream
+    } catch (error) {
+      console.error("Failed to get local stream:", error)
+      setPermissionsDenied(true)
+      return null
+    }
+  }, [])
+
+  const toggleVideo = useCallback(async () => {
+    if (localStream) {
+      const videoTracks = localStream.getVideoTracks()
+      if (videoTracks.length > 0) {
+        videoTracks.forEach((track) => {
+          track.enabled = !isVideoEnabled
+        })
+        setIsVideoEnabled(!isVideoEnabled)
+      }
+    } else if (type === "video" && permissionsDenied) {
+      // Try to get permissions again
+      const stream = await getLocalStream(isFrontCamera)
+      if (stream) {
+        setLocalStream(stream)
+        setIsVideoEnabled(true)
+        setIsAudioEnabled(true)
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream
+        }
+        // Add tracks to peer connection
+        const pc = peerConnectionRef.current
+        if (pc) {
+          stream.getTracks().forEach((track) => {
+            pc.addTrack(track, stream)
+          })
+        }
+      }
+    }
+  }, [localStream, isVideoEnabled, type, permissionsDenied, getLocalStream, isFrontCamera])
+
+  const toggleAudio = useCallback(async () => {
+    if (localStream) {
+      const audioTracks = localStream.getAudioTracks()
+      if (audioTracks.length > 0) {
+        audioTracks.forEach((track) => {
+          track.enabled = !isAudioEnabled
+        })
+        setIsAudioEnabled(!isAudioEnabled)
+      }
+    } else if (type === "video" && permissionsDenied) {
+      // Try to get permissions again
+      const stream = await getLocalStream(isFrontCamera)
+      if (stream) {
+        setLocalStream(stream)
+        setIsVideoEnabled(true)
+        setIsAudioEnabled(true)
+        if (localVideoRef.current) {
+          localVideoRef.current.srcObject = stream
+        }
+        const pc = peerConnectionRef.current
+        if (pc) {
+          stream.getTracks().forEach((track) => {
+            pc.addTrack(track, stream)
+          })
+        }
+      }
+    }
+  }, [localStream, isAudioEnabled, type, permissionsDenied, getLocalStream, isFrontCamera])
+
+  const flipCamera = useCallback(async () => {
+    if (!localStream) return
+
+    const newFacingMode = !isFrontCamera
+    setIsFrontCamera(newFacingMode)
+
+    // Stop current tracks
+    localStream.getTracks().forEach((track) => track.stop())
+
+    // Get new stream with different camera
+    const newStream = await getLocalStream(newFacingMode)
+    if (newStream) {
+      setLocalStream(newStream)
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = newStream
+      }
+
+      // Replace tracks in peer connection
+      const pc = peerConnectionRef.current
+      if (pc) {
+        const senders = pc.getSenders()
+        for (const track of newStream.getTracks()) {
+          const sender = senders.find((s) => s.track?.kind === track.kind)
+          if (sender) {
+            await sender.replaceTrack(track)
+          }
+        }
+      }
+    }
+  }, [localStream, isFrontCamera, getLocalStream])
 
   // Set up signal handler
   useEffect(() => {
@@ -149,12 +276,13 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
       try {
         let stream: MediaStream | null = null
 
-        if (type === "video") {
-          stream = await getLocalStream()
-          setLocalStream(stream)
-
-          if (localVideoRef.current) {
-            localVideoRef.current.srcObject = stream
+        if (type === "video" && !permissionsDenied) {
+          stream = await getLocalStream(isFrontCamera)
+          if (stream) {
+            setLocalStream(stream)
+            if (localVideoRef.current) {
+              localVideoRef.current.srcObject = stream
+            }
           }
         }
 
@@ -200,9 +328,7 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
           channel.onmessage = (event) => {
             handleIncomingMessage(event.data)
           }
-          channel.onclose = () => {
-            // Data channel closed - peer may have left
-          }
+          channel.onclose = () => {}
           channel.onerror = (error) => {
             console.error("Data channel error:", error)
           }
@@ -243,7 +369,7 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
         }
 
         if (isInitiator) {
-          await new Promise((resolve) => setTimeout(resolve, 800))
+          await new Promise((resolve) => setTimeout(resolve, 500))
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
 
@@ -263,7 +389,7 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
     return () => {
       isCleaningUpRef.current = true
     }
-  }, [roomId, peerId, isInitiator, mode, type])
+  }, [roomId, peerId, isInitiator, mode, type, permissionsDenied, getLocalStream, isFrontCamera])
 
   useEffect(() => {
     return () => {
@@ -330,24 +456,6 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
-
-  const toggleVideo = useCallback(() => {
-    if (localStream) {
-      localStream.getVideoTracks().forEach((track) => {
-        track.enabled = !isVideoEnabled
-      })
-      setIsVideoEnabled(!isVideoEnabled)
-    }
-  }, [localStream, isVideoEnabled])
-
-  const toggleAudio = useCallback(() => {
-    if (localStream) {
-      localStream.getAudioTracks().forEach((track) => {
-        track.enabled = !isAudioEnabled
-      })
-      setIsAudioEnabled(!isAudioEnabled)
-    }
-  }, [localStream, isAudioEnabled])
 
   const sendMessage = useCallback((text: string): boolean => {
     const dc = dataChannelRef.current
@@ -588,10 +696,32 @@ export function VideoRoom({ mode, type, peerId, roomId, isInitiator, onSkip, onL
             </Button>
           </motion.div>
 
-          {/* Local video preview */}
-          {type === "video" && localStream && (
+          {type === "video" && (
             <div className="absolute bottom-24 right-6 h-32 w-48 overflow-hidden rounded-xl border border-border bg-secondary shadow-lg">
-              <video ref={localVideoRef} autoPlay playsInline muted className="h-full w-full object-cover" />
+              {localStream ? (
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="h-full w-full object-cover"
+                  style={{ transform: isFrontCamera ? "scaleX(-1)" : "none" }}
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center bg-secondary">
+                  <VideoOff className="h-8 w-8 text-muted-foreground" />
+                </div>
+              )}
+              {localStream && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={flipCamera}
+                  className="absolute bottom-2 right-2 h-8 w-8 rounded-full bg-background/80 backdrop-blur-lg hover:bg-background"
+                >
+                  <SwitchCamera className="h-4 w-4" />
+                </Button>
+              )}
             </div>
           )}
         </div>

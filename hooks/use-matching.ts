@@ -42,7 +42,6 @@ export function useMatching(options: UseMatchingOptions = {}) {
         setIsSessionReady(true)
       } catch (error) {
         console.error("Failed to initialize session:", error)
-        // Retry after delay
         setTimeout(initSession, 2000)
       }
     }
@@ -84,10 +83,25 @@ export function useMatching(options: UseMatchingOptions = {}) {
         setState("matched")
         optionsRef.current.onMatched?.(peer)
       } else if (result.type === "left") {
-        // Peer left - trigger auto-skip to find next match
+        setMatchedPeer(null)
+        setState("searching")
+        optionsRef.current.onPeerLeft?.()
+
+        // Automatically rejoin the queue
         if (currentMode && currentType) {
-          setState("searching")
-          setMatchedPeer(null)
+          signalingRef.current.joinQueue(currentMode, currentType).then((newResult) => {
+            if (newResult.type === "matched" && newResult.peerId && newResult.roomId) {
+              const peer: MatchedPeer = {
+                id: newResult.peerId,
+                roomId: newResult.roomId,
+                mode: currentMode,
+                isInitiator: newResult.isInitiator ?? false,
+              }
+              setMatchedPeer(peer)
+              setState("matched")
+              optionsRef.current.onMatched?.(peer)
+            }
+          })
         }
       }
     })
@@ -113,7 +127,6 @@ export function useMatching(options: UseMatchingOptions = {}) {
     } else if (result.type === "error") {
       setState("error")
     }
-    // If waiting, the callback will handle when match is found
   }, [])
 
   const cancelSearch = useCallback(async () => {
@@ -142,7 +155,6 @@ export function useMatching(options: UseMatchingOptions = {}) {
         setState("matched")
         optionsRef.current.onMatched?.(peer)
       }
-      // If not immediately matched, polling will continue
     }
   }, [currentMode, currentType, matchedPeer?.roomId])
 
@@ -152,7 +164,6 @@ export function useMatching(options: UseMatchingOptions = {}) {
     setCurrentMode(null)
     setCurrentType(null)
     setMatchedPeer(null)
-    optionsRef.current.onPeerLeft?.()
   }, [])
 
   // Cleanup on unmount and page unload

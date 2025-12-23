@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useCallback, useEffect } from "react"
-import { useRouter } from "next/navigation"
 import { ModeSelection } from "@/components/app/mode-selection"
 import { MatchingScreen } from "@/components/app/matching-screen"
 import { VideoRoom } from "@/components/app/video-room"
@@ -9,19 +8,29 @@ import { AppNav } from "@/components/app/app-nav"
 import { useMatching } from "@/hooks/use-matching"
 import { motion } from "framer-motion"
 
-export type AppMode = "casual" | "pitch" | "collab" | "hiring" | "review"
+export type AppMode = "casual" | "pitch" | "collab" | "hire" | "freelance" | "review"
 export type ConnectionType = "video" | "chat"
 export type AppState = "loading" | "select" | "matching" | "connected"
 
+export interface MediaPermissions {
+  video: boolean
+  audio: boolean
+  denied: boolean
+}
+
 export default function AppPage() {
   const [appState, setAppState] = useState<AppState>("loading")
+  const [peerLeftMessage, setPeerLeftMessage] = useState<string | null>(null)
+  const [mediaPermissions, setMediaPermissions] = useState<MediaPermissions | null>(null)
 
   const onMatched = useCallback(() => {
+    setPeerLeftMessage(null)
     setAppState("connected")
   }, [])
 
   const onPeerLeft = useCallback(() => {
-    setAppState("select")
+    setPeerLeftMessage("The developer has left... Don't worry, we'll connect you to new developers!")
+    setAppState("matching")
   }, [])
 
   const {
@@ -46,7 +55,11 @@ export default function AppPage() {
   }, [isSessionReady, appState])
 
   const handleModeSelect = useCallback(
-    (mode: AppMode, type: ConnectionType) => {
+    async (mode: AppMode, type: ConnectionType, permissions?: MediaPermissions) => {
+      if (permissions) {
+        setMediaPermissions(permissions)
+      }
+      setPeerLeftMessage(null)
       setAppState("matching")
       startSearching(mode, type)
     },
@@ -55,15 +68,16 @@ export default function AppPage() {
 
   const handleCancel = useCallback(() => {
     cancelSearch()
+    setPeerLeftMessage(null)
+    setMediaPermissions(null)
     setAppState("select")
   }, [cancelSearch])
 
   const handleSkip = useCallback(() => {
+    setPeerLeftMessage(null)
     setAppState("matching")
     skipPeer()
   }, [skipPeer])
-
-  const router = useRouter()
 
   const handleLeave = useCallback(async () => {
     await leaveMatch()
@@ -90,7 +104,12 @@ export default function AppPage() {
       <main className="flex-1 overflow-auto relative">
         {appState === "select" && <ModeSelection onSelect={handleModeSelect} />}
         {appState === "matching" && currentMode && (
-          <MatchingScreen mode={currentMode} onlineCount={onlineCount} onCancel={handleCancel} />
+          <MatchingScreen
+            mode={currentMode}
+            onlineCount={onlineCount}
+            onCancel={handleCancel}
+            peerLeftMessage={peerLeftMessage}
+          />
         )}
         {appState === "connected" && currentMode && currentType && matchedPeer && (
           <VideoRoom
@@ -101,6 +120,7 @@ export default function AppPage() {
             isInitiator={matchedPeer.isInitiator}
             onSkip={handleSkip}
             onLeave={handleLeave}
+            initialPermissions={mediaPermissions}
           />
         )}
       </main>

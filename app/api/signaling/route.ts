@@ -18,6 +18,12 @@ function generateRoomId(): string {
   return `room_${timestamp}_${random}`
 }
 
+function getMatchingMode(mode: AppMode): AppMode {
+  if (mode === "hire") return "freelance"
+  if (mode === "freelance") return "hire"
+  return mode
+}
+
 export async function POST(request: NextRequest) {
   try {
     // Verify session from Authorization header
@@ -47,19 +53,21 @@ export async function POST(request: NextRequest) {
         // Remove from any existing room/queue first
         await cleanupSession(sessionId)
 
-        const queueKey = keys.queue(mode, type)
+        const matchingMode = getMatchingMode(mode)
+        const queueKey = keys.queue(matchingMode, type)
+        const ownQueueKey = keys.queue(mode, type)
 
-        // Try to find a match
+        // Try to find a match from the complementary queue
         let attempts = 0
         const MAX_ATTEMPTS = 5
 
         while (attempts < MAX_ATTEMPTS) {
-          // Atomic pop from queue
+          // Atomic pop from the matching queue
           const peerId = await redis.lpop(queueKey)
 
           if (!peerId) {
-            // No one waiting, add ourselves to queue
-            await redis.rpush(queueKey, sessionId)
+            // No one waiting in matching queue, add ourselves to our own queue
+            await redis.rpush(ownQueueKey, sessionId)
             return NextResponse.json({ success: true, matched: false })
           }
 
@@ -98,13 +106,12 @@ export async function POST(request: NextRequest) {
           await redis.set(keys.sessionRoom(peerId), roomId, "EX", 3600)
 
           // Notify the waiting peer by storing match info
-          // The peer will pick this up on their next check-match poll
           await redis.set(
             `match:${peerId}`,
             JSON.stringify({
               roomId,
               peerId: sessionId,
-              isInitiator: false, // The waiter is NOT the initiator
+              isInitiator: false,
             }),
             "EX",
             60,
@@ -115,12 +122,12 @@ export async function POST(request: NextRequest) {
             matched: true,
             roomId,
             peerId,
-            isInitiator: true, // We (the joiner) are the initiator
+            isInitiator: true,
           })
         }
 
-        // Failed to find valid match after retries, add to queue
-        await redis.rpush(queueKey, sessionId)
+        // Failed to find valid match after retries, add to our own queue
+        await redis.rpush(ownQueueKey, sessionId)
         return NextResponse.json({ success: true, matched: false })
       }
 
@@ -224,41 +231,48 @@ export async function POST(request: NextRequest) {
       case "skip": {
         const { roomId, mode, type } = body as { roomId: string; mode: AppMode; type: ConnectionType }
 
-        // Notify peer that we're leaving
         const roomData = await redis.get(keys.room(roomId))
         if (roomData) {
           const room = JSON.parse(roomData)
           const peerId = room.participants.find((p: string) => p !== sessionId)
 
           if (peerId) {
-            // Put peer back in queue for immediate rematch
-            await redis.rpush(keys.queue(mode, type), peerId)
+            // Clear peer's room association so they know we left
+            await redis.del(keys.sessionRoom(peerId))
+            // Put peer back in their queue for immediate rematch
+            const peerMode = room.mode as AppMode
+            await redis.rpush(keys.queue(peerMode, type), peerId)
+            // Notify peer they need to find a new match
+            await redis.set(
+              `match:${peerId}`,
+              JSON.stringify({
+                type: "left",
+              }),
+              "EX",
+              10,
+            )
           }
         }
 
         // Clean up current room
         await cleanupSession(sessionId)
 
-        // Now rejoin queue
-        const queueKey = keys.queue(mode, type)
+        const matchingMode = getMatchingMode(mode)
+        const queueKey = keys.queue(matchingMode, type)
+        const ownQueueKey = keys.queue(mode, type)
 
         // Try to find a new match
         const peerId = await redis.lpop(queueKey)
 
         if (!peerId || peerId === sessionId) {
-          // No one available or got ourselves, add to queue
-          if (peerId === sessionId) {
-            // Don't add back
-          } else {
-            await redis.rpush(queueKey, sessionId)
-          }
+          await redis.rpush(ownQueueKey, sessionId)
           return NextResponse.json({ success: true, matched: false })
         }
 
         // Check peer validity
         const peerHeartbeat = await redis.get(keys.heartbeat(peerId))
         if (!peerHeartbeat || Date.now() - Number.parseInt(peerHeartbeat) > 30000) {
-          await redis.rpush(queueKey, sessionId)
+          await redis.rpush(ownQueueKey, sessionId)
           return NextResponse.json({ success: true, matched: false })
         }
 
@@ -303,7 +317,6 @@ export async function POST(request: NextRequest) {
       case "leave": {
         const { roomId } = body
 
-        // Notify peer
         if (roomId) {
           const roomData = await redis.get(keys.room(roomId))
           if (roomData) {
@@ -311,8 +324,21 @@ export async function POST(request: NextRequest) {
             const peerId = room.participants.find((p: string) => p !== sessionId)
 
             if (peerId) {
-              // Mark peer's room as having peer left
+              // Clear peer's room association
               await redis.del(keys.sessionRoom(peerId))
+              // Put peer back in queue
+              const type = room.type as ConnectionType
+              const peerMode = room.mode as AppMode
+              await redis.rpush(keys.queue(peerMode, type), peerId)
+              // Notify peer to find new match
+              await redis.set(
+                `match:${peerId}`,
+                JSON.stringify({
+                  type: "left",
+                }),
+                "EX",
+                10,
+              )
             }
           }
         }
@@ -332,7 +358,7 @@ export async function POST(request: NextRequest) {
 
 async function cleanupSession(sessionId: string) {
   // Remove from any queues
-  const modes = ["casual", "pitch", "collab", "hiring", "review"]
+  const modes = ["casual", "pitch", "collab", "hire", "freelance", "review"]
   const types = ["video", "chat"]
 
   for (const mode of modes) {

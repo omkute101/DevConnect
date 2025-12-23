@@ -9,7 +9,8 @@ const modeLabels: Record<AppMode, string> = {
   casual: "Casual Dev Talk",
   pitch: "Startup Pitch",
   collab: "Finding Collaborators",
-  hiring: "Hiring / Freelance",
+  hire: "Hiring Developers",
+  freelance: "Finding Clients",
   review: "Code Review",
 }
 
@@ -17,9 +18,10 @@ interface MatchingScreenProps {
   mode: AppMode
   onlineCount: number
   onCancel: () => void
+  peerLeftMessage?: string | null
 }
 
-export function MatchingScreen({ mode, onlineCount, onCancel }: MatchingScreenProps) {
+export function MatchingScreen({ mode, onlineCount, onCancel, peerLeftMessage }: MatchingScreenProps) {
   return (
     <div className="flex h-full flex-col items-center justify-center px-6 py-12 overflow-hidden">
       <motion.div
@@ -28,6 +30,16 @@ export function MatchingScreen({ mode, onlineCount, onCancel }: MatchingScreenPr
         transition={{ duration: 0.5 }}
         className="text-center"
       >
+        {peerLeftMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-8 rounded-lg border border-border bg-card px-6 py-4 max-w-md mx-auto"
+          >
+            <p className="text-sm text-muted-foreground">{peerLeftMessage}</p>
+          </motion.div>
+        )}
+
         {/* Animated rings */}
         <div className="relative mx-auto mb-12 h-40 w-40">
           {[0, 1, 2].map((i) => (
@@ -60,12 +72,12 @@ export function MatchingScreen({ mode, onlineCount, onCancel }: MatchingScreenPr
           </div>
         </div>
 
-        <h2 className="text-2xl font-bold tracking-tight md:text-3xl">Looking for a match...</h2>
+        <h2 className="text-2xl font-bold tracking-tight md:text-3xl">
+          {peerLeftMessage ? "Finding your next match..." : "Looking for a match..."}
+        </h2>
         <p className="mt-3 text-muted-foreground">
           Mode: <span className="text-foreground">{modeLabels[mode]}</span>
         </p>
-
-
 
         <motion.div
           initial={{ opacity: 0 }}
@@ -73,9 +85,9 @@ export function MatchingScreen({ mode, onlineCount, onCancel }: MatchingScreenPr
           transition={{ delay: 0.5, duration: 0.4 }}
           className="mt-10"
         >
-          <Button 
-            onClick={onCancel} 
-            className="gap-2 bg-red-500 text-black hover:bg-red-600 hover:text-black cursor-pointer border-none"
+          <Button
+            onClick={onCancel}
+            className="gap-2 bg-red-500 text-black hover:bg-red-600 hover:text-black border-none"
           >
             <X className="h-4 w-4 text-black" />
             Cancel
