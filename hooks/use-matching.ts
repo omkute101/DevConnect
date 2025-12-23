@@ -30,7 +30,6 @@ export function useMatching(options: UseMatchingOptions = {}) {
   const statsIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const optionsRef = useRef(options)
 
-  // Keep options ref updated
   useEffect(() => {
     optionsRef.current = options
   }, [options])
@@ -48,7 +47,6 @@ export function useMatching(options: UseMatchingOptions = {}) {
     initSession()
   }, [])
 
-  // Fetch online stats periodically
   useEffect(() => {
     const fetchStats = async () => {
       const stats = await signalingRef.current.getStats()
@@ -67,7 +65,6 @@ export function useMatching(options: UseMatchingOptions = {}) {
     }
   }, [])
 
-  // Set up match and peer-left callbacks
   useEffect(() => {
     const signaling = signalingRef.current
 
@@ -87,7 +84,7 @@ export function useMatching(options: UseMatchingOptions = {}) {
         setState("searching")
         optionsRef.current.onPeerLeft?.()
 
-        // Automatically rejoin the queue
+        // Automatically rejoin the queue for immediate rematch
         if (currentMode && currentType) {
           signalingRef.current.joinQueue(currentMode, currentType).then((newResult) => {
             if (newResult.type === "matched" && newResult.peerId && newResult.roomId) {
@@ -166,7 +163,6 @@ export function useMatching(options: UseMatchingOptions = {}) {
     setMatchedPeer(null)
   }, [])
 
-  // Cleanup on unmount and page unload
   useEffect(() => {
     const handleBeforeUnload = () => {
       signalingRef.current.leaveQueue().catch(() => {})

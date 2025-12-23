@@ -81,6 +81,7 @@ export default function AppPage() {
 
   const handleLeave = useCallback(async () => {
     await leaveMatch()
+    // Redirect to home
     window.location.href = "/"
   }, [leaveMatch])
 

@@ -8,7 +8,7 @@ export const rtcConfig: RTCConfiguration = {
     { urls: "stun:stun3.l.google.com:19302" },
     { urls: "stun:stun4.l.google.com:19302" },
   ],
-  iceCandidatePoolSize: 10, // Pre-fetch ICE candidates
+  iceCandidatePoolSize: 10,
 }
 
 export async function getLocalStream(video = true, audio = true): Promise<MediaStream> {
@@ -26,7 +26,7 @@ export async function getLocalStream(video = true, audio = true): Promise<MediaS
         ? {
             echoCancellation: true,
             noiseSuppression: true,
-            autoGainControl: true, // Add auto gain control
+            autoGainControl: true,
           }
         : false,
     })
@@ -44,7 +44,6 @@ export function createPeerConnection(
 ): RTCPeerConnection {
   const pc = new RTCPeerConnection(config)
 
-  // Keep track of the remote stream we're building
   let remoteStream: MediaStream | null = null
 
   pc.onicecandidate = (event) => {
@@ -54,22 +53,18 @@ export function createPeerConnection(
   }
 
   pc.ontrack = (event) => {
-    console.log("[v0] ontrack fired, track kind:", event.track.kind, "streams:", event.streams.length)
-
-    // Always create or update the remote stream with the new track
     if (!remoteStream) {
       remoteStream = new MediaStream()
     }
-    
+
     remoteStream.addTrack(event.track)
-    
-    // If we have streams from the event, we can also use those to ensure we capture everything
+
     if (event.streams && event.streams[0]) {
-       event.streams[0].getTracks().forEach(track => {
-         if (!remoteStream!.getTracks().find(t => t.id === track.id)) {
-           remoteStream!.addTrack(track)
-         }
-       })
+      event.streams[0].getTracks().forEach((track) => {
+        if (!remoteStream!.getTracks().find((t) => t.id === track.id)) {
+          remoteStream!.addTrack(track)
+        }
+      })
     }
 
     onTrack(remoteStream)

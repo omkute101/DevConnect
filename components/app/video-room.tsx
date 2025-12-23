@@ -27,7 +27,7 @@ import { ConnectionQuality } from "@/components/app/connection-quality"
 import { AutoDisconnectWarning } from "@/components/app/auto-disconnect-warning"
 import type { DeveloperProfile } from "@/lib/developer-profile"
 import { getSignalingService, type WebRTCSignal } from "@/lib/signaling-service"
-import { rtcConfig, createPeerConnection } from "@/lib/webrtc"
+import { rtcConfig } from "@/lib/webrtc"
 
 type ConnectionState = "idle" | "connecting" | "connected" | "disconnected" | "failed"
 
@@ -88,6 +88,7 @@ export function VideoRoom({
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([])
   const isInitializedRef = useRef(false)
   const isCleaningUpRef = useRef(false)
+  const remoteStreamRef = useRef<MediaStream | null>(null)
 
   const getLocalStream = useCallback(async (useFrontCamera = true): Promise<MediaStream | null> => {
     try {
@@ -123,7 +124,6 @@ export function VideoRoom({
         setIsVideoEnabled(!isVideoEnabled)
       }
     } else if (type === "video" && permissionsDenied) {
-      // Try to get permissions again
       const stream = await getLocalStream(isFrontCamera)
       if (stream) {
         setLocalStream(stream)
@@ -132,7 +132,6 @@ export function VideoRoom({
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream
         }
-        // Add tracks to peer connection
         const pc = peerConnectionRef.current
         if (pc) {
           stream.getTracks().forEach((track) => {
@@ -153,7 +152,6 @@ export function VideoRoom({
         setIsAudioEnabled(!isAudioEnabled)
       }
     } else if (type === "video" && permissionsDenied) {
-      // Try to get permissions again
       const stream = await getLocalStream(isFrontCamera)
       if (stream) {
         setLocalStream(stream)
@@ -178,10 +176,8 @@ export function VideoRoom({
     const newFacingMode = !isFrontCamera
     setIsFrontCamera(newFacingMode)
 
-    // Stop current tracks
     localStream.getTracks().forEach((track) => track.stop())
 
-    // Get new stream with different camera
     const newStream = await getLocalStream(newFacingMode)
     if (newStream) {
       setLocalStream(newStream)
@@ -189,7 +185,6 @@ export function VideoRoom({
         localVideoRef.current.srcObject = newStream
       }
 
-      // Replace tracks in peer connection
       const pc = peerConnectionRef.current
       if (pc) {
         const senders = pc.getSenders()
@@ -289,30 +284,50 @@ export function VideoRoom({
 
         const signaling = getSignalingService()
 
-        const pc = createPeerConnection(
-          rtcConfig,
-          async (candidate) => {
-            await signaling.sendSignal(roomId, peerId, {
-              type: "ice-candidate",
-              payload: candidate.toJSON(),
-            })
-          },
-          (remoteMediaStream) => {
-            setRemoteStream(remoteMediaStream)
-            if (remoteVideoRef.current) {
-              remoteVideoRef.current.srcObject = remoteMediaStream
-            }
-          },
-        )
-
+        const pc = new RTCPeerConnection(rtcConfig)
         peerConnectionRef.current = pc
 
+        // Handle ICE candidates
+        pc.onicecandidate = async (event) => {
+          if (event.candidate) {
+            await signaling.sendSignal(roomId, peerId, {
+              type: "ice-candidate",
+              payload: event.candidate.toJSON(),
+            })
+          }
+        }
+
+        pc.ontrack = (event) => {
+          // Create or get existing remote stream
+          if (!remoteStreamRef.current) {
+            remoteStreamRef.current = new MediaStream()
+          }
+
+          // Add the track to our stream
+          const existingTrack = remoteStreamRef.current.getTracks().find((t) => t.id === event.track.id)
+          if (!existingTrack) {
+            remoteStreamRef.current.addTrack(event.track)
+          }
+
+          // Update state and attach to video element
+          setRemoteStream(remoteStreamRef.current)
+
+          if (remoteVideoRef.current) {
+            if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
+              remoteVideoRef.current.srcObject = remoteStreamRef.current
+            }
+            remoteVideoRef.current.play().catch(() => {})
+          }
+        }
+
+        // Add local tracks if we have them
         if (stream) {
           stream.getTracks().forEach((track) => {
             pc.addTrack(track, stream!)
           })
         }
 
+        // Set up data channel
         const setupDataChannel = (channel: RTCDataChannel) => {
           channel.onopen = () => {
             setConnectionState("connected")
@@ -330,9 +345,7 @@ export function VideoRoom({
             handleIncomingMessage(event.data)
           }
           channel.onclose = () => {}
-          channel.onerror = (error) => {
-            console.error("Data channel error:", error)
-          }
+          channel.onerror = () => {}
         }
 
         if (isInitiator) {
@@ -370,7 +383,7 @@ export function VideoRoom({
         }
 
         if (isInitiator) {
-          await new Promise((resolve) => setTimeout(resolve, 500))
+          await new Promise((resolve) => setTimeout(resolve, 300))
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
 
@@ -392,12 +405,14 @@ export function VideoRoom({
     }
   }, [roomId, peerId, isInitiator, mode, type, permissionsDenied, getLocalStream, isFrontCamera])
 
+  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (isCleaningUpRef.current) {
         dataChannelRef.current?.close()
         peerConnectionRef.current?.close()
         localStream?.getTracks().forEach((track) => track.stop())
+        remoteStreamRef.current = null
       }
     }
   }, [localStream])
@@ -473,6 +488,7 @@ export function VideoRoom({
     peerConnectionRef.current = null
     dataChannelRef.current = null
     pendingCandidatesRef.current = []
+    remoteStreamRef.current = null
     setRemoteStream(null)
     setConnectionState("idle")
   }, [])
@@ -502,8 +518,8 @@ export function VideoRoom({
       e.preventDefault()
       if (!message.trim()) return
 
-      if ('key' in e && e.key === 'Enter' && e.shiftKey) {
-          return
+      if ("key" in e && e.key === "Enter" && e.shiftKey) {
+        return
       }
 
       setMessages((prev) => [
@@ -520,7 +536,6 @@ export function VideoRoom({
       sendMessage(message.trim())
       setMessage("")
 
-      // Keep focus on textarea
       setTimeout(() => {
         if (textareaRef.current) {
           textareaRef.current.focus()
@@ -592,16 +607,14 @@ export function VideoRoom({
           </div>
           <div className="space-y-2">
             <h3 className="text-xl font-semibold tracking-tight">Establishing Secure Connection</h3>
-            <p className="text-muted-foreground">
-              Encrypting channel with {peerId ? "peer" : "server"}...
-            </p>
+            <p className="text-muted-foreground">Connecting with peer...</p>
           </div>
         </div>
       </div>
     )
   }
 
-  // Chat Only Mode UI - Redesigned Full Screen
+  // Chat Only Mode UI
   if (type === "chat") {
     return (
       <div className="fixed inset-0 z-40 flex flex-col bg-background">
@@ -621,11 +634,21 @@ export function VideoRoom({
           </div>
 
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={handleSkip} className="gap-2 text-muted-foreground hover:text-foreground">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleSkip}
+              className="gap-2 text-muted-foreground hover:text-foreground"
+            >
               <SkipForward className="h-4 w-4" />
               <span className="hidden sm:inline">Next</span>
             </Button>
-            <Button variant="ghost" size="sm" onClick={handleLeave} className="gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLeave}
+              className="gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
               <PhoneOff className="h-4 w-4" />
               <span className="hidden sm:inline">Leave</span>
             </Button>
@@ -640,20 +663,25 @@ export function VideoRoom({
               <p className="text-sm text-muted-foreground">Start the conversation!</p>
             </div>
           )}
-          {messages.map((msg, i) => {
-             const isMe = msg.sender === "me";
-             const isSystem = msg.sender === "system";
-             
-             if (isSystem) {
-                 return (
-                     <div key={msg.id} className="flex justify-center py-2">
-                       <span className="rounded-full bg-secondary/50 px-3 py-1 text-xs text-muted-foreground">{msg.text}</span>
-                     </div>
-                   )
-             }
+          {messages.map((msg) => {
+            const isMe = msg.sender === "me"
+            const isSystem = msg.sender === "system"
 
-             return (
-              <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+            if (isSystem) {
+              return (
+                <div key={msg.id} className="flex justify-center py-2">
+                  <span className="rounded-full bg-secondary/50 px-3 py-1 text-xs text-muted-foreground">
+                    {msg.text}
+                  </span>
+                </div>
+              )
+            }
+
+            return (
+              <div
+                key={msg.id}
+                className={`flex ${isMe ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}
+              >
                 <div
                   className={`relative max-w-[85%] sm:max-w-[70%] rounded-2xl px-5 py-3 shadow-sm ${
                     isMe
@@ -664,7 +692,7 @@ export function VideoRoom({
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
                 </div>
               </div>
-             )
+            )
           })}
           <div ref={chatEndRef} />
         </div>
@@ -672,28 +700,28 @@ export function VideoRoom({
         {/* Input Area */}
         <div className="shrink-0 p-4 border-t border-border/50 bg-background/80 backdrop-blur-xl">
           <form onSubmit={handleSendMessage} className="mx-auto max-w-4xl flex gap-3 items-end">
-             <div className="flex-1 relative">
-                <Textarea
+            <div className="flex-1 relative">
+              <Textarea
                 ref={textareaRef}
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault()
-                        handleSendMessage(e)
-                    }
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault()
+                    handleSendMessage(e)
+                  }
                 }}
                 placeholder="Type a message..."
                 className="min-h-[50px] max-h-[150px] py-3 pr-12 rounded-2xl border-border/50 bg-secondary/50 focus:bg-background transition-all resize-none shadow-sm text-base"
                 autoFocus
               />
-             </div>
-            <Button 
-                type="submit" 
-                size="icon" 
-                className="h-[50px] w-[50px] rounded-xl shrink-0 shadow-lg transition-all active:scale-95"
-                disabled={!message.trim()}
-                onMouseDown={(e) => e.preventDefault()}
+            </div>
+            <Button
+              type="submit"
+              size="icon"
+              className="h-[50px] w-[50px] rounded-xl shrink-0 shadow-lg transition-all active:scale-95"
+              disabled={!message.trim()}
+              onMouseDown={(e) => e.preventDefault()}
             >
               <Send className="h-5 w-5" />
             </Button>
@@ -729,19 +757,13 @@ export function VideoRoom({
             muted={false}
             className="h-full w-full object-cover"
             poster="/developer-video-call-dark-background.jpg"
-            onLoadedMetadata={(e) => {
-              console.log("Remote video metadata loaded, attempting to play")
-              e.currentTarget.play().catch((err) => console.error("Remote video play error:", err))
-            }}
           />
 
-          {connectionState !== "connected" && (
+          {connectionState !== "connected" && !remoteStream && (
             <div className="absolute inset-0 flex items-center justify-center bg-secondary/80">
               <div className="text-center">
                 <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
-                <p className="text-sm text-muted-foreground">
-                  Waiting for connection...
-                </p>
+                <p className="text-sm text-muted-foreground">Waiting for peer video...</p>
               </div>
             </div>
           )}
@@ -793,9 +815,6 @@ export function VideoRoom({
                   muted
                   className="h-full w-full object-cover"
                   style={{ transform: isFrontCamera ? "scaleX(-1)" : "none" }}
-                  onLoadedMetadata={(e) => {
-                    e.currentTarget.play().catch((err) => console.error("Local video play error:", err))
-                  }}
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-secondary">
@@ -851,11 +870,11 @@ export function VideoRoom({
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault()
-                        handleSendMessage(e)
-                    }
-                }}
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSendMessage(e)
+                }
+              }}
               placeholder={connectionState === "connected" ? "Type a message..." : "Connecting..."}
               className="flex-1 bg-secondary min-h-[40px] max-h-[120px] resize-none"
               disabled={connectionState !== "connected"}
@@ -904,8 +923,8 @@ export function VideoRoom({
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {
-                        e.preventDefault()
-                        handleSendMessage(e)
+                      e.preventDefault()
+                      handleSendMessage(e)
                     }
                   }}
                   placeholder={connectionState === "connected" ? "Type a message..." : "Connecting..."}
