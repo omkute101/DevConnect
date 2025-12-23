@@ -81,6 +81,7 @@ export function VideoRoom({
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
   const chatEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null)
   const dataChannelRef = useRef<RTCDataChannel | null>(null)
@@ -518,6 +519,13 @@ export function VideoRoom({
 
       sendMessage(message.trim())
       setMessage("")
+
+      // Keep focus on textarea
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus()
+        }
+      }, 10)
     },
     [message, sendMessage],
   )
@@ -666,6 +674,7 @@ export function VideoRoom({
           <form onSubmit={handleSendMessage} className="mx-auto max-w-4xl flex gap-3 items-end">
              <div className="flex-1 relative">
                 <Textarea
+                ref={textareaRef}
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={(e) => {
@@ -684,6 +693,7 @@ export function VideoRoom({
                 size="icon" 
                 className="h-[50px] w-[50px] rounded-xl shrink-0 shadow-lg transition-all active:scale-95"
                 disabled={!message.trim()}
+                onMouseDown={(e) => e.preventDefault()}
             >
               <Send className="h-5 w-5" />
             </Button>
@@ -837,6 +847,7 @@ export function VideoRoom({
         <form onSubmit={handleSendMessage} className="border-t border-border p-4">
           <div className="flex gap-2">
             <Textarea
+              ref={textareaRef}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               onKeyDown={(e) => {
@@ -854,6 +865,7 @@ export function VideoRoom({
               size="icon"
               className="bg-foreground text-background hover:bg-foreground/90"
               disabled={connectionState !== "connected"}
+              onMouseDown={(e) => e.preventDefault()}
             >
               <Send className="h-4 w-4" />
             </Button>
@@ -887,6 +899,7 @@ export function VideoRoom({
             <form onSubmit={handleSendMessage} className="border-t border-border p-4">
               <div className="flex gap-2">
                 <Textarea
+                  ref={textareaRef}
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
                   onKeyDown={(e) => {
@@ -904,6 +917,7 @@ export function VideoRoom({
                   size="icon"
                   className="bg-foreground text-background hover:bg-foreground/90"
                   disabled={connectionState !== "connected"}
+                  onMouseDown={(e) => e.preventDefault()}
                 >
                   <Send className="h-4 w-4" />
                 </Button>
