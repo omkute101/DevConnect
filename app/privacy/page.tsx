@@ -1,11 +1,11 @@
-import { LandingNav } from "@/components/landing/nav"
+import { SimpleNav } from "@/components/landing/simple-nav"
 import { LandingFooter } from "@/components/landing/footer"
 import { Lock } from "lucide-react"
 
 export default function PrivacyPage() {
   return (
-    <main className="min-h-screen bg-background">
-      <LandingNav />
+    <main className="h-full overflow-y-auto bg-background">
+      <SimpleNav />
 
       <section className="pt-32 pb-20">
         <div className="mx-auto max-w-3xl px-6">

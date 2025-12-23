@@ -22,7 +22,7 @@ export function AppNav({ onLeave, isConnected }: AppNavProps) {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground">
             <span className="text-sm font-bold text-background">OC</span>
           </div>
-          <span className="text-lg font-semibold tracking-tight">OmniConnect</span>
+          <span className="text-lg font-bold tracking-tight">OmniConnect</span>
         </Link>
 
         <div className="flex items-center gap-3">

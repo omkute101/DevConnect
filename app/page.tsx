@@ -13,7 +13,7 @@ export default function HomePage() {
         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
         className="shrink-0 flex items-center justify-between px-6 py-5 md:px-12 lg:px-20 z-50"
       >
-        <span className="text-foreground font-medium tracking-tight text-lg">OmniConnect</span>
+        <span className="text-foreground font-bold tracking-tight text-lg">OmniConnect</span>
         <Link href="/app">
           <motion.button
             whileTap={{ scale: 0.98 }}
@@ -73,7 +73,11 @@ export default function HomePage() {
         transition={{ duration: 1, delay: 0.8 }}
         className="shrink-0 py-6 text-center z-50"
       >
-        <span className="text-muted-foreground/50 text-xs tracking-wide">Om Kute</span>
+        <div className="flex gap-6 justify-center text-muted-foreground/50 text-xs tracking-wide">
+          <Link href="/privacy" className="hover:text-muted-foreground transition-colors">Privacy</Link>
+          <Link href="/rules" className="hover:text-muted-foreground transition-colors">Rules</Link>
+          <Link href="/terms" className="hover:text-muted-foreground transition-colors">Terms</Link>
+        </div>
       </motion.footer>
     </main>
   )

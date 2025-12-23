@@ -1,4 +1,4 @@
-import { LandingNav } from "@/components/landing/nav"
+import { SimpleNav } from "@/components/landing/simple-nav"
 import { LandingFooter } from "@/components/landing/footer"
 import { Shield, AlertTriangle, Heart, Users, Ban, MessageSquare } from "lucide-react"
 
@@ -50,8 +50,8 @@ const violations = [
 
 export default function RulesPage() {
   return (
-    <main className="min-h-screen bg-background">
-      <LandingNav />
+    <main className="h-full overflow-y-auto bg-background">
+      <SimpleNav />
 
       <section className="pt-32 pb-20">
         <div className="mx-auto max-w-4xl px-6">
