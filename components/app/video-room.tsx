@@ -19,7 +19,7 @@ import {
   AlertTriangle,
   SwitchCamera,
 } from "lucide-react"
-import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import type { AppMode, ConnectionType, MediaPermissions } from "@/app/app/page"
 import { SharePanel } from "@/components/app/share-panel"
 import { ReportModal } from "@/components/app/report-modal"
@@ -497,9 +497,13 @@ export function VideoRoom({
   )
 
   const handleSendMessage = useCallback(
-    (e: React.FormEvent) => {
+    (e: React.FormEvent | React.KeyboardEvent) => {
       e.preventDefault()
       if (!message.trim()) return
+
+      if ('key' in e && e.key === 'Enter' && e.shiftKey) {
+          return
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -592,7 +596,7 @@ export function VideoRoom({
   // Chat Only Mode UI - Redesigned Full Screen
   if (type === "chat") {
     return (
-      <div className="fixed inset-0 z-40 flex flex-col bg-background">
+      <div className="fixed top-0 left-0 w-full h-[100dvh] z-40 flex flex-col bg-background">
         {/* Chat Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 py-3 backdrop-blur-xl md:px-6">
           <div className="flex items-center gap-3">
@@ -634,10 +638,10 @@ export function VideoRoom({
              
              if (isSystem) {
                  return (
-                    <div key={msg.id} className="flex justify-center py-2">
-                      <span className="rounded-full bg-secondary/50 px-3 py-1 text-xs text-muted-foreground">{msg.text}</span>
-                    </div>
-                  )
+                     <div key={msg.id} className="flex justify-center py-2">
+                       <span className="rounded-full bg-secondary/50 px-3 py-1 text-xs text-muted-foreground">{msg.text}</span>
+                     </div>
+                   )
              }
 
              return (
@@ -650,9 +654,6 @@ export function VideoRoom({
                   }`}
                 >
                   <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
-                  <span className={`text-[10px] absolute bottom-1 ${isMe ? "right-3 text-primary-foreground/70" : "left-3 text-muted-foreground"} `}>
-                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </span>
                 </div>
               </div>
              )
@@ -664,13 +665,18 @@ export function VideoRoom({
         <div className="shrink-0 p-4 border-t border-border/50 bg-background/80 backdrop-blur-xl">
           <form onSubmit={handleSendMessage} className="mx-auto max-w-4xl flex gap-3 items-end">
              <div className="flex-1 relative">
-                <Input
+                <Textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
+                onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSendMessage(e)
+                    }
+                }}
                 placeholder="Type a message..."
-                className="min-h-[50px] py-3 pr-12 rounded-2xl border-border/50 bg-secondary/50 focus:bg-background transition-all resize-none shadow-sm text-base"
+                className="min-h-[50px] max-h-[150px] py-3 pr-12 rounded-2xl border-border/50 bg-secondary/50 focus:bg-background transition-all resize-none shadow-sm text-base"
                 autoFocus
-                autoComplete="off"
               />
              </div>
             <Button 
@@ -823,11 +829,17 @@ export function VideoRoom({
 
         <form onSubmit={handleSendMessage} className="border-t border-border p-4">
           <div className="flex gap-2">
-            <Input
+            <Textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
+              onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSendMessage(e)
+                    }
+                }}
               placeholder={connectionState === "connected" ? "Type a message..." : "Connecting..."}
-              className="flex-1 bg-secondary"
+              className="flex-1 bg-secondary min-h-[40px] max-h-[120px] resize-none"
               disabled={connectionState !== "connected"}
             />
             <Button
@@ -867,11 +879,17 @@ export function VideoRoom({
 
             <form onSubmit={handleSendMessage} className="border-t border-border p-4">
               <div className="flex gap-2">
-                <Input
+                <Textarea
                   value={message}
                   onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSendMessage(e)
+                    }
+                  }}
                   placeholder={connectionState === "connected" ? "Type a message..." : "Connecting..."}
-                  className="flex-1 bg-secondary"
+                  className="flex-1 bg-secondary min-h-[40px] max-h-[120px] resize-none"
                   disabled={connectionState !== "connected"}
                 />
                 <Button
