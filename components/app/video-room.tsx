@@ -567,69 +567,136 @@ export function VideoRoom({
     )
   }
 
-  // Chat Only Mode UI
+  // Connecting Overlay
+  if (connectionState === "connecting" || connectionState === "idle") {
+    return (
+      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-6 max-w-md px-6 text-center">
+          <div className="relative h-16 w-16">
+            <div className="absolute inset-0 animate-ping rounded-full bg-primary/20" />
+            <div className="relative flex h-full w-full items-center justify-center rounded-full bg-primary/10 border border-primary/20">
+              <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <h3 className="text-xl font-semibold tracking-tight">Establishing Secure Connection</h3>
+            <p className="text-muted-foreground">
+              Encrypting channel with {peerId ? "peer" : "server"}...
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Chat Only Mode UI - Redesigned Full Screen
   if (type === "chat") {
     return (
-      <div className="flex h-[calc(100vh-4rem)] flex-col justify-center max-w-4xl mx-auto w-full p-4">
-        <div className="relative flex-1 bg-card border rounded-xl overflow-hidden shadow-lg flex flex-col">
-          <div className="flex items-center justify-between border-b p-4 bg-muted/20">
-            <div className="flex items-center gap-2">
-              <div
-                className={`h-3 w-3 rounded-full ${connectionState === "connected" ? "bg-green-500" : "bg-yellow-500 animate-pulse"}`}
-              />
-              <span className="font-semibold">Anonymous Developer ({mode})</span>
+      <div className="fixed inset-0 z-40 flex flex-col bg-background">
+        {/* Chat Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 py-3 backdrop-blur-xl md:px-6">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-secondary text-primary">
+              <User className="h-5 w-5" />
             </div>
-
-            <div className="flex items-center gap-2">
-              <Button variant="secondary" size="sm" onClick={handleSkip} className="gap-2">
-                <SkipForward className="h-4 w-4" /> Next
-              </Button>
-              <Button variant="destructive" size="sm" onClick={handleLeave} className="gap-2">
-                <PhoneOff className="h-4 w-4" /> Leave
-              </Button>
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {messages.length === 0 && (
-              <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-                <p>{connectionState === "connected" ? "Say hello!" : "Connecting..."}</p>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="font-semibold leading-none">Anonymous Developer</h3>
+                <span className="flex h-2 w-2 rounded-full bg-green-500" />
               </div>
-            )}
-            {messages.map(renderMessage)}
-            <div ref={chatEndRef} />
+              <p className="text-xs text-muted-foreground mt-1 capitalize">{mode} Mode</p>
+            </div>
           </div>
 
-          <form onSubmit={handleSendMessage} className="border-t p-4 bg-muted/10">
-            <div className="flex gap-2">
-              <Input
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={handleSkip} className="gap-2 text-muted-foreground hover:text-foreground">
+              <SkipForward className="h-4 w-4" />
+              <span className="hidden sm:inline">Next</span>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={handleLeave} className="gap-2 text-destructive hover:bg-destructive/10 hover:text-destructive">
+              <PhoneOff className="h-4 w-4" />
+              <span className="hidden sm:inline">Leave</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* Chat Messages */}
+        <div className="flex-1 overflow-y-auto p-4 md:p-6 space-y-6">
+          {messages.length === 0 && (
+            <div className="flex h-full flex-col items-center justify-center opacity-50">
+              <MessageSquare className="mb-4 h-12 w-12 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground">Start the conversation!</p>
+            </div>
+          )}
+          {messages.map((msg, i) => {
+             const isMe = msg.sender === "me";
+             const isSystem = msg.sender === "system";
+             
+             if (isSystem) {
+                 return (
+                    <div key={msg.id} className="flex justify-center py-2">
+                      <span className="rounded-full bg-secondary/50 px-3 py-1 text-xs text-muted-foreground">{msg.text}</span>
+                    </div>
+                  )
+             }
+
+             return (
+              <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+                <div
+                  className={`relative max-w-[85%] sm:max-w-[70%] rounded-2xl px-5 py-3 shadow-sm ${
+                    isMe
+                      ? "bg-primary text-primary-foreground rounded-tr-sm"
+                      : "bg-secondary text-secondary-foreground rounded-tl-sm"
+                  }`}
+                >
+                  <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.text}</p>
+                  <span className={`text-[10px] absolute bottom-1 ${isMe ? "right-3 text-primary-foreground/70" : "left-3 text-muted-foreground"} `}>
+                    {msg.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+              </div>
+             )
+          })}
+          <div ref={chatEndRef} />
+        </div>
+
+        {/* Input Area */}
+        <div className="shrink-0 p-4 border-t border-border/50 bg-background/80 backdrop-blur-xl">
+          <form onSubmit={handleSendMessage} className="mx-auto max-w-4xl flex gap-3 items-end">
+             <div className="flex-1 relative">
+                <Input
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
-                placeholder={connectionState === "connected" ? "Type a message..." : "Connecting..."}
-                className="flex-1"
-                disabled={connectionState !== "connected"}
+                placeholder="Type a message..."
+                className="min-h-[50px] py-3 pr-12 rounded-2xl border-border/50 bg-secondary/50 focus:bg-background transition-all resize-none shadow-sm text-base"
                 autoFocus
+                autoComplete="off"
               />
-              <Button type="submit" size="icon" disabled={connectionState !== "connected"}>
-                <Send className="h-4 w-4" />
-              </Button>
-            </div>
+             </div>
+            <Button 
+                type="submit" 
+                size="icon" 
+                className="h-[50px] w-[50px] rounded-xl shrink-0 shadow-lg transition-all active:scale-95"
+                disabled={!message.trim()}
+            >
+              <Send className="h-5 w-5" />
+            </Button>
           </form>
-
-          <ReportModal
-            isOpen={isReportOpen}
-            onClose={() => setIsReportOpen(false)}
-            peerId={peerId}
-            roomId={roomId}
-            onAutoDisconnect={handleReportAutoDisconnect}
-          />
-          <AutoDisconnectWarning
-            isVisible={showDisconnectWarning}
-            reason={disconnectReason}
-            onStay={() => setShowDisconnectWarning(false)}
-            onLeave={handleLeave}
-          />
         </div>
+
+        <ReportModal
+          isOpen={isReportOpen}
+          onClose={() => setIsReportOpen(false)}
+          peerId={peerId}
+          roomId={roomId}
+          onAutoDisconnect={handleReportAutoDisconnect}
+        />
+        <AutoDisconnectWarning
+          isVisible={showDisconnectWarning}
+          reason={disconnectReason}
+          onStay={() => setShowDisconnectWarning(false)}
+          onLeave={handleLeave}
+        />
       </div>
     )
   }
@@ -653,14 +720,14 @@ export function VideoRoom({
               <div className="text-center">
                 <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
                 <p className="text-sm text-muted-foreground">
-                  {connectionState === "connecting" ? "Connecting to peer..." : "Waiting for connection..."}
+                  Waiting for connection...
                 </p>
               </div>
             </div>
           )}
 
           <div className="absolute top-6 right-6">
-            {connectionState !== "idle" && <ConnectionQuality connectionState={connectionState} />}
+            <ConnectionQuality connectionState={connectionState} />
           </div>
 
           <AutoDisconnectWarning
