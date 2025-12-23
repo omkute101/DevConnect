@@ -596,7 +596,7 @@ export function VideoRoom({
   // Chat Only Mode UI - Redesigned Full Screen
   if (type === "chat") {
     return (
-      <div className="fixed top-0 left-0 w-full h-[100dvh] z-40 flex flex-col bg-background">
+      <div className="fixed inset-0 z-40 flex flex-col bg-background">
         {/* Chat Header */}
         <div className="flex shrink-0 items-center justify-between border-b border-border/50 bg-background/80 px-4 py-3 backdrop-blur-xl md:px-6">
           <div className="flex items-center gap-3">
@@ -719,6 +719,10 @@ export function VideoRoom({
             muted={false}
             className="h-full w-full object-cover"
             poster="/developer-video-call-dark-background.jpg"
+            onLoadedMetadata={(e) => {
+              console.log("Remote video metadata loaded, attempting to play")
+              e.currentTarget.play().catch((err) => console.error("Remote video play error:", err))
+            }}
           />
 
           {connectionState !== "connected" && (
@@ -779,6 +783,9 @@ export function VideoRoom({
                   muted
                   className="h-full w-full object-cover"
                   style={{ transform: isFrontCamera ? "scaleX(-1)" : "none" }}
+                  onLoadedMetadata={(e) => {
+                    e.currentTarget.play().catch((err) => console.error("Local video play error:", err))
+                  }}
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-secondary">

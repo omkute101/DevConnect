@@ -56,20 +56,23 @@ export function createPeerConnection(
   pc.ontrack = (event) => {
     console.log("[v0] ontrack fired, track kind:", event.track.kind, "streams:", event.streams.length)
 
-    // Use existing stream if available, otherwise create new one
-    if (event.streams && event.streams[0]) {
-      console.log("[v0] Using stream from event.streams[0]")
-      remoteStream = event.streams[0]
-      onTrack(remoteStream)
-    } else {
-      // Some browsers don't populate streams array - create our own
-      console.log("[v0] No streams in event, creating new MediaStream")
-      if (!remoteStream) {
-        remoteStream = new MediaStream()
-      }
-      remoteStream.addTrack(event.track)
-      onTrack(remoteStream)
+    // Always create or update the remote stream with the new track
+    if (!remoteStream) {
+      remoteStream = new MediaStream()
     }
+    
+    remoteStream.addTrack(event.track)
+    
+    // If we have streams from the event, we can also use those to ensure we capture everything
+    if (event.streams && event.streams[0]) {
+       event.streams[0].getTracks().forEach(track => {
+         if (!remoteStream!.getTracks().find(t => t.id === track.id)) {
+           remoteStream!.addTrack(track)
+         }
+       })
+    }
+
+    onTrack(remoteStream)
   }
 
   return pc
