@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useCallback, useEffect } from "react"
+import { useRouter } from "next/navigation"
 import { ModeSelection } from "@/components/app/mode-selection"
 import { MatchingScreen } from "@/components/app/matching-screen"
 import { VideoRoom } from "@/components/app/video-room"
@@ -19,6 +20,7 @@ export interface MediaPermissions {
 }
 
 export default function AppPage() {
+  const router = useRouter()
   const [appState, setAppState] = useState<AppState>("loading")
   const [peerLeftMessage, setPeerLeftMessage] = useState<string | null>(null)
   const [mediaPermissions, setMediaPermissions] = useState<MediaPermissions | null>(null)
@@ -81,9 +83,9 @@ export default function AppPage() {
 
   const handleLeave = useCallback(async () => {
     await leaveMatch()
-    // Redirect to home
-    window.location.href = "/"
-  }, [leaveMatch])
+    // Redirect to home smoothly
+    router.push("/")
+  }, [leaveMatch, router])
 
   if (appState === "loading") {
     return (
