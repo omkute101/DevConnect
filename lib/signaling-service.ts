@@ -294,7 +294,11 @@ class SignalingService {
     if (this.signalPollInterval) return
 
     this.signalPollInterval = setInterval(async () => {
-      if (!this.currentRoomId) return
+      // Ensure we're still in the room we started polling for
+      if (!this.currentRoomId) {
+        this.stopSignalPolling()
+        return
+      }
 
       try {
         const headers = await this.getAuthHeaders()
@@ -309,13 +313,22 @@ class SignalingService {
 
         if (!response.ok) {
           if (response.status === 403) {
+            console.warn("Received 403 for room", this.currentRoomId, "stopping polling")
             // We were kicked out or room is invalid
             this.stopSignalPolling()
-            this.onMatchCallback?.({ success: true, type: "left" }) // Use "left" to reset UI
+            
+            // Only notify if we haven't already cleaned up
+            if (this.currentRoomId) {
+              this.currentRoomId = null
+              this.onMatchCallback?.({ success: true, type: "left" })
+            }
             return
           }
           return
         }
+
+        // Double check room didn't change while we were fetching
+        if (!this.currentRoomId) return
 
         const data = await response.json()
 
