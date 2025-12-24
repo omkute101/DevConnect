@@ -11,37 +11,37 @@ Real-time backend service for OmniConnect - handles WebSocket connections, match
 ## Setup
 
 1. Install dependencies:
-```bash
+\`\`\`bash
 npm install
-```
+\`\`\`
 
 2. Set environment variables:
-```bash
+\`\`\`bash
 export REDIS_URL=redis://localhost:6379
 export SESSION_SECRET=your-jwt-secret  # Must match Next.js
 export PORT=3001
 export CORS_ORIGIN=http://localhost:3000
-```
+\`\`\`
 
 3. Run development server:
-```bash
+\`\`\`bash
 npm run dev
-```
+\`\`\`
 
 4. Build for production:
-```bash
+\`\`\`bash
 npm run build
 npm start
-```
+\`\`\`
 
 ## Deployment
 
 ### Fly.io
-```bash
+\`\`\`bash
 fly launch
 fly secrets set REDIS_URL=your-redis-url SESSION_SECRET=your-secret
 fly deploy
-```
+\`\`\`
 
 ### Railway
 Connect your repo and set environment variables in the dashboard.

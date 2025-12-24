@@ -2,7 +2,7 @@
 // Redis-backed for horizontal scalability
 
 import { redis } from "@/lib/redis"
-import { SignJWT, jwtVerify } from "jose"
+import jwt from "jsonwebtoken"
 
 export interface Session {
   sessionId: string
@@ -15,28 +15,22 @@ export interface Session {
 
 export interface SessionPayload {
   sessionId: string
-  createdAt: number
-  exp: number
+  createdAt?: number
+  iat?: number
+  exp?: number
 }
 
 const SECRET_KEY = process.env.SESSION_SECRET || "omniconnect-anonymous-session-secret-2024"
-const SECRET = new TextEncoder().encode(SECRET_KEY)
 const SESSION_TTL = 24 * 60 * 60 // 24 hours in seconds
 
 export async function createSessionToken(sessionId: string): Promise<string> {
-  const now = Math.floor(Date.now() / 1000)
-  
-  return new SignJWT({ sessionId, createdAt: now })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime("24h")
-    .sign(SECRET)
+  return jwt.sign({ sessionId }, SECRET_KEY, { expiresIn: "24h" })
 }
 
 export async function verifySessionToken(token: string): Promise<SessionPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, SECRET)
-    return payload as unknown as SessionPayload
+    const payload = jwt.verify(token, SECRET_KEY) as SessionPayload
+    return payload
   } catch {
     return null
   }
@@ -61,21 +55,20 @@ export async function createSession(): Promise<Session> {
     reportCount: 0,
   }
 
-  // Store in Redis with TTL
-  await redis.set(`session:${sessionId}`, JSON.stringify(session), "EX", SESSION_TTL)
+  await redis.set(`session:${sessionId}`, JSON.stringify(session), { ex: SESSION_TTL })
 
   return session
 }
 
 export async function getSession(sessionId: string): Promise<Session | null> {
-  const data = await redis.get(`session:${sessionId}`)
+  const data = await redis.get<string>(`session:${sessionId}`)
   if (!data) return null
 
-  const session = JSON.parse(data) as Session
+  const session = typeof data === "string" ? JSON.parse(data) : (data as unknown as Session)
 
   // Update lastSeen and refresh TTL
   session.lastSeen = Date.now()
-  await redis.set(`session:${sessionId}`, JSON.stringify(session), "EX", SESSION_TTL)
+  await redis.set(`session:${sessionId}`, JSON.stringify(session), { ex: SESSION_TTL })
 
   return session
 }
@@ -86,7 +79,7 @@ export async function updateSession(sessionId: string, updates: Partial<Session>
 
   Object.assign(session, updates, { lastSeen: Date.now() })
 
-  await redis.set(`session:${sessionId}`, JSON.stringify(session), "EX", SESSION_TTL)
+  await redis.set(`session:${sessionId}`, JSON.stringify(session), { ex: SESSION_TTL })
   return session
 }
 
@@ -100,7 +93,7 @@ export async function incrementReportCount(sessionId: string): Promise<number> {
   if (!session) return 0
 
   session.reportCount += 1
-  await redis.set(`session:${sessionId}`, JSON.stringify(session), "EX", SESSION_TTL)
+  await redis.set(`session:${sessionId}`, JSON.stringify(session), { ex: SESSION_TTL })
 
   return session.reportCount
 }
@@ -117,16 +110,7 @@ export async function verifySession(token: string): Promise<SessionPayload | nul
 }
 
 export async function getActiveSessionCount(): Promise<number> {
-  // Count active heartbeats (sessions active in last 30 seconds)
-  const keys = await redis.keys("heartbeat:*")
-  let activeCount = 0
-
-  for (const key of keys) {
-    const heartbeat = await redis.get(key)
-    if (heartbeat && Date.now() - Number.parseInt(heartbeat) < 30000) {
-      activeCount++
-    }
-  }
-
-  return activeCount
+  // For Upstash, we'll estimate based on a counter
+  const count = await redis.get<number>("active-session-count")
+  return count || 0
 }

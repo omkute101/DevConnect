@@ -86,8 +86,7 @@ class SignalingService {
 
   constructor() {
     // In production, this should be your deployed Socket.IO backend URL
-    // e.g., https://your-backend.fly.dev or wss://your-backend.railway.app
-    this.backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001"
+    this.backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8080"
   }
 
   async initSession(): Promise<SessionData> {
@@ -131,6 +130,7 @@ class SignalingService {
 
     for (let i = 0; i < retries; i++) {
       try {
+        // The backend will verify this token using the same SECRET
         const response = await fetch("/api/session/init", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -181,24 +181,41 @@ class SignalingService {
         reconnection: true,
         reconnectionAttempts: 5,
         reconnectionDelay: 1000,
-        timeout: 10000,
+        reconnectionDelayMax: 5000,
+        timeout: 20000,
+        forceNew: true, // Force new connection to avoid stale connections
       })
 
+      const connectionTimeout = setTimeout(() => {
+        if (!this.isConnected) {
+          this.socket?.disconnect()
+          reject(new Error("Connection timeout"))
+        }
+      }, 15000)
+
       this.socket.on("connect", () => {
+        clearTimeout(connectionTimeout)
         this.isConnected = true
         resolve()
       })
 
       this.socket.on("connect_error", (error) => {
         console.error("Socket connection error:", error.message)
-        reject(error)
+
+        if (error.message.includes("Invalid token") || error.message.includes("Authentication")) {
+          this.session = null
+          this.storage.removeItem("omniconnect-session")
+          clearTimeout(connectionTimeout)
+          reject(new Error("Authentication failed - please refresh"))
+        }
       })
 
       this.socket.on("disconnect", (reason) => {
         this.isConnected = false
         if (reason === "io server disconnect") {
-          // Server disconnected us, try to reconnect
-          this.socket?.connect()
+          // Server disconnected us, try to reconnect with new session
+          this.session = null
+          this.storage.removeItem("omniconnect-session")
         }
       })
 
@@ -219,7 +236,6 @@ class SignalingService {
       })
 
       this.socket.on("peer-skipped", () => {
-        // Peer clicked next, we should also be put back in queue
         this.onMatchCallback?.({ success: true, type: "skipped" })
       })
 
@@ -239,17 +255,11 @@ class SignalingService {
         this.onMatchCallback?.({ success: false, type: "error", message: error.message })
       })
 
-      // Handle auth errors
-      this.socket.on("auth-error", async () => {
-        // Clear session and try to reconnect with new token
+      // Handle auth errors from server
+      this.socket.on("auth-error", () => {
         this.session = null
         this.storage.removeItem("omniconnect-session")
         this.socket?.disconnect()
-        try {
-          await this.connectSocket()
-        } catch (e) {
-          console.error("Failed to reconnect after auth error:", e)
-        }
       })
     })
   }
@@ -274,7 +284,7 @@ class SignalingService {
           resolve(response)
         })
 
-        // Timeout after 5 seconds
+        // Timeout after 5 seconds to return waiting state
         setTimeout(() => {
           resolve({ success: true, type: "waiting" })
         }, 5000)
@@ -308,7 +318,6 @@ class SignalingService {
         resolve()
       })
 
-      // Resolve anyway after timeout
       setTimeout(resolve, 1000)
     })
   }
@@ -326,7 +335,6 @@ class SignalingService {
         resolve(response)
       })
 
-      // Timeout - return waiting state
       setTimeout(() => {
         resolve({ success: true, type: "waiting" })
       }, 5000)
@@ -334,7 +342,9 @@ class SignalingService {
   }
 
   async sendSignal(roomId: string, targetId: string, signal: WebRTCSignal): Promise<void> {
-    if (!this.socket?.connected) return
+    if (!this.socket?.connected) {
+      return
+    }
 
     this.socket.emit("signal", {
       roomId,
@@ -344,12 +354,10 @@ class SignalingService {
   }
 
   async getStats(): Promise<PlatformStats | null> {
-    // Request stats from socket
     if (this.socket?.connected) {
       this.socket.emit("get-stats")
     }
 
-    // Also try HTTP endpoint as fallback
     try {
       const response = await fetch("/api/stats")
       if (response.ok) {

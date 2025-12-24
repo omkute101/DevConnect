@@ -1,4 +1,4 @@
-import { Redis } from "ioredis"
+import { Redis } from "@upstash/redis"
 
 const getRedisUrl = () => {
   if (process.env.REDIS_URL) {
@@ -8,8 +8,10 @@ const getRedisUrl = () => {
   throw new Error("REDIS_URL is not defined")
 }
 
-export const redis = new Redis(getRedisUrl())
-redis.on("error", (err) => console.error("Redis Client Error:", err))
+export const redis = new Redis({
+  url: process.env.KV_REST_API_URL!,
+  token: process.env.KV_REST_API_TOKEN!,
+})
 
 export const redisPublisher = new Redis(getRedisUrl())
 redisPublisher.on("error", (err) => console.error("Redis Publisher Error:", err))

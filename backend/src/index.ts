@@ -1,16 +1,13 @@
 // OmniConnect Backend Service
 // Node.js + Express + Socket.IO server for real-time matchmaking and WebRTC signaling
-// Deploy to Fly.io, Railway, or any Node.js hosting
 
-import express from "express";
+import express from "express"
 import { createServer } from "http"
 import { Server, type Socket } from "socket.io"
 import { createAdapter } from "@socket.io/redis-adapter"
 import { createClient, type RedisClientType } from "redis"
 import jwt from "jsonwebtoken"
 import cors from "cors"
-import { createSession, createSessionToken, incrementReportCount, getActiveSessionCount, verifySessionToken, getSession } from "./utils/session";
-import { checkRateLimit, RATE_LIMITS } from "./utils/rate-limiter";
 
 // Types
 interface SessionData {
@@ -38,14 +35,16 @@ interface Match {
 
 // Environment variables
 const PORT = process.env.PORT || 8080
-const REDIS_URL = process.env.REDIS_URL || "redis://localhost:6379"
-const JWT_SECRET = process.env.SESSION_SECRET || "your-secret-key"
+const REDIS_URL = process.env.REDIS_URL || process.env.KV_URL || "redis://localhost:6379"
+const JWT_SECRET = process.env.SESSION_SECRET || "omniconnect-anonymous-session-secret-2024"
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*"
 
 // App Setup
-const app = express();
-app.use(cors({ origin: CORS_ORIGIN, methods: ["GET", "POST"] }));
-app.use(express.json());
+const app = express()
+app.use(
+  cors({ origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN.split(","), methods: ["GET", "POST"], credentials: true }),
+)
+app.use(express.json())
 
 // Redis clients
 let pubClient: RedisClientType
@@ -56,7 +55,6 @@ let redisClient: RedisClientType
 let io: Server
 
 // Stats
-// Note: In a scalable setup, these should be in Redis
 let onlineCount = 0
 let totalConnections = 0
 let todayConnections = 0
@@ -75,30 +73,53 @@ const modeMatchPairs: Record<string, string> = {
   freelance: "hire",
 }
 
-// In-memory storage for reports (migrate to DB in production)
-const reports: Array<{
-  id: string
-  reporterSessionId: string
-  reportedSessionId: string
-  roomId: string
-  reason: string
-  details?: string
-  timestamp: number
-  status: "pending" | "reviewed" | "resolved"
-}> = [];
+const SESSION_TTL = 24 * 60 * 60 // 24 hours
 
-// Track reported sessions for auto-disconnect
-const reportedSessions = new Map<string, number>();
-const AUTO_DISCONNECT_THRESHOLD = 3;
+function getRedisConnectionUrl(): string {
+  let url = REDIS_URL
+
+  // Handle Upstash REST API URLs - convert to standard redis URL if needed
+  if (url.includes("upstash.io") && !url.startsWith("redis://") && !url.startsWith("rediss://")) {
+    // If it's a REST API URL, we can't use it directly with ioredis
+    // Use the REDIS_URL which should be the standard redis:// URL
+    console.warn("Detected Upstash REST URL, looking for standard Redis URL...")
+  }
+
+  // Ensure TLS for production
+  if (url.includes("upstash.io") && url.startsWith("redis://")) {
+    url = url.replace("redis://", "rediss://")
+  }
+
+  return url
+}
 
 async function initRedis() {
-  pubClient = createClient({ url: REDIS_URL })
+  const redisUrl = getRedisConnectionUrl()
+
+  console.log("Connecting to Redis...")
+
+  const clientConfig: { url: string; socket?: { tls: boolean; rejectUnauthorized: boolean } } = {
+    url: redisUrl,
+  }
+
+  if (redisUrl.startsWith("rediss://")) {
+    clientConfig.socket = {
+      tls: true,
+      rejectUnauthorized: false,
+    }
+  }
+
+  pubClient = createClient(clientConfig)
   subClient = pubClient.duplicate()
   redisClient = pubClient.duplicate()
 
+  pubClient.on("error", (err) => console.error("Redis Pub Client Error:", err))
+  subClient.on("error", (err) => console.error("Redis Sub Client Error:", err))
+  redisClient.on("error", (err) => console.error("Redis Client Error:", err))
+
   await Promise.all([pubClient.connect(), subClient.connect(), redisClient.connect()])
 
-  console.log("Connected to Redis")
+  console.log("Connected to Redis successfully")
 }
 
 function getQueueKey(mode: string, connectionType: string): string {
@@ -115,6 +136,49 @@ function getSocketKey(socketId: string): string {
 
 function getMatchKey(matchId: string): string {
   return `match:${matchId}`
+}
+
+function generateSessionId(): string {
+  const timestamp = Date.now().toString(36)
+  const randomPart = Math.random().toString(36).substring(2, 15)
+  return `sess_${timestamp}_${randomPart}`
+}
+
+function createSessionToken(sessionId: string): string {
+  return jwt.sign({ sessionId }, JWT_SECRET, { expiresIn: "24h" })
+}
+
+function verifyToken(token: string): SessionData | null {
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as SessionData
+    return decoded
+  } catch (error) {
+    if (error instanceof jwt.TokenExpiredError) {
+      console.log("Token expired")
+    } else if (error instanceof jwt.JsonWebTokenError) {
+      console.log("Invalid token:", error.message)
+    } else {
+      console.error("Token verification error:", error)
+    }
+    return null
+  }
+}
+
+async function createSession(): Promise<{ sessionId: string }> {
+  const sessionId = generateSessionId()
+  const now = Date.now()
+
+  const session = {
+    sessionId,
+    socketId: null,
+    selectedMode: null,
+    createdAt: now,
+    lastSeen: now,
+    reportCount: 0,
+  }
+
+  await redisClient.set(`session:${sessionId}`, JSON.stringify(session), { EX: SESSION_TTL })
+  return { sessionId }
 }
 
 async function addToQueue(entry: QueueEntry): Promise<void> {
@@ -400,11 +464,15 @@ async function handleSignal(
 
   // Verify user is in this match
   const sessionData = await redisClient.hGetAll(getSessionKey(sessionId))
-  if (sessionData.matchId !== roomId) return
+  if (sessionData.matchId !== roomId) {
+    return
+  }
 
   // Get target socket
   const targetData = await redisClient.hGetAll(getSessionKey(targetId))
-  if (!targetData.socketId) return
+  if (!targetData.socketId) {
+    return
+  }
 
   // Forward signal
   io.to(targetData.socketId).emit("signal", {
@@ -413,219 +481,102 @@ async function handleSignal(
   })
 }
 
-function verifyToken(token: string): SessionData | null {
-  try {
-    return jwt.verify(token, JWT_SECRET) as SessionData
-  } catch {
-    return null
-  }
-}
-
-// Helper to get session from request
-function getSessionFromRequest(request: express.Request): { sessionId: string } | null {
-    const authHeader = request.headers.authorization;
-    if (!authHeader?.startsWith("Bearer ")) return null;
-  
-    const token = authHeader.slice(7);
-    const payload = verifySessionToken(token);
-    if (!payload) return null;
-  
-    return { sessionId: payload.sessionId };
-}
-
 // API Routes
 
 // Health check
 app.get("/health", (req, res) => {
-    res.status(200).json({ status: "ok", uptime: process.uptime() });
-});
+  res.status(200).json({ status: "ok", uptime: process.uptime() })
+})
 
-// Session Init
 app.post("/api/session/init", async (req, res) => {
-    try {
-      const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0] || req.socket.remoteAddress || "unknown";
-      
-      const rateLimit = checkRateLimit(`session-init:${ip}`, RATE_LIMITS.sessionInit);
-      if (!rateLimit.allowed) {
-          return res.status(429).json({
-              success: false, 
-              error: "Too many requests. Please try again later.",
-              headers: {
-                  "X-RateLimit-Remaining": rateLimit.remaining.toString(),
-                  "X-RateLimit-Reset": rateLimit.resetIn.toString(),
-              }
-          });
-      }
-  
-      const session = await createSession();
-      const token = createSessionToken(session.sessionId);
-  
-      res.json({
-          success: true,
-          sessionId: session.sessionId,
-          token,
-          expiresIn: 86400, // 24 hours
-      });
-  
-    } catch (error) {
-      console.error("Session init error:", error);
-      res.status(500).json({ success: false, error: "Failed to create session" });
-    }
-});
-  
-// Reports
-app.post("/api/reports", async (req, res) => {
-    try {
-        const tokenSession = getSessionFromRequest(req);
-        const { reportedSessionId, roomId, reason, details, reporterId } = req.body;
-    
-        const reporterSessionId = tokenSession?.sessionId || reporterId;
-    
-        if (!reporterSessionId) {
-            return res.status(401).json({ success: false, error: "Unauthorized" });
-        }
-    
-        const rateLimit = checkRateLimit(`report:${reporterSessionId}`, RATE_LIMITS.report);
-        if (!rateLimit.allowed) {
-            return res.status(429).json({ success: false, error: "Too many reports. Please try again later." });
-        }
-    
-        if (!reportedSessionId || !reason) {
-            return res.status(400).json({ success: false, error: "Missing required fields" });
-        }
-    
-        if (reporterSessionId === reportedSessionId) {
-            return res.status(400).json({ success: false, error: "Cannot report yourself" });
-        }
-    
-        const report = {
-            id: `report-${Date.now()}-${Math.random().toString(36).substring(7)}`,
-            reporterSessionId,
-            reportedSessionId,
-            roomId: roomId || "unknown",
-            reason,
-            details,
-            timestamp: Date.now(),
-            status: "pending" as const,
-        };
-    
-        reports.push(report);
-    
-        await incrementReportCount(reportedSessionId);
-    
-        // Track for auto-disconnect
-        const currentCount = (reportedSessions.get(reportedSessionId) || 0) + 1;
-        reportedSessions.set(reportedSessionId, currentCount);
-    
-        const shouldAutoDisconnect = currentCount >= AUTO_DISCONNECT_THRESHOLD;
-    
-        res.json({
-            success: true,
-            reportId: report.id,
-            message: "Report submitted successfully.",
-            shouldAutoDisconnect,
-        });
+  try {
+    const session = await createSession()
+    const token = createSessionToken(session.sessionId)
 
-        } catch (error) {
-        console.error("Report error:", error);
-        res.status(500).json({ success: false, error: "Server error" });
-        }
-});
-
-app.get("/api/reports", async (req, res) => {
-    const status = req.query.status as string;
-    let filteredReports = reports;
-    if (status) {
-        filteredReports = reports.filter((r) => r.status === status);
-    }
-    
     res.json({
-        reports: filteredReports.slice(-100),
-        total: filteredReports.length,
-    });
-});
+      success: true,
+      sessionId: session.sessionId,
+      token,
+      expiresIn: 86400, // 24 hours
+    })
+  } catch (error) {
+    console.error("Session init error:", error)
+    res.status(500).json({ success: false, error: "Failed to create session" })
+  }
+})
 
-// Stats
+// Stats endpoint
 app.get("/api/stats", async (req, res) => {
-    try {
-        const modes = ["casual", "pitch", "collab", "hiring", "review"];
-        const types = ["video", "chat"];
-        
-        const queueStats: Record<string, number> = {
-            casual: 0,
-            pitch: 0,
-            collab: 0,
-            hiring: 0,
-            review: 0,
-        };
-        
-        // This is efficient enough for small scale but might want to be optimized or cached
-        // Using Promise.all for parallelism
-        await Promise.all(modes.map(async (mode) => {
-            const counts = await Promise.all(types.map(type => 
-                redisClient.lLen(`queue:${mode}:${type}`)
-            ));
-            queueStats[mode] = counts.reduce((a, b) => a + b, 0);
-        }));
-        
-        // Count active sessions (approximate active rooms)
-        // Note: This relies on keys pattern matching which can be slow in Redis with many keys
-        // Ideally we keep a counter in Redis
-        const activeRooms = Math.ceil((await redisClient.keys("match:*")).length);
+  try {
+    const modes = ["casual", "pitch", "collab", "hire", "freelance", "review"]
+    const types = ["video", "chat"]
 
-        const activeSessions = await getActiveSessionCount();
-        
-        // Add some base numbers for demo purposes (copied from Next.js logic)
-        const baseOnline = 247;
-        const realOnline = activeSessions > 0 ? activeSessions : baseOnline;
-        
-        res.json({
-            online: realOnline + Math.floor(Math.random() * 20),
-            totalConnections: 2847293 + activeRooms,
-            todayConnections: 12847 + activeRooms,
-            byMode: {
-                casual: queueStats.casual + 50,
-                pitch: queueStats.pitch + 25,
-                collab: queueStats.collab + 35,
-                hiring: queueStats.hiring + 15,
-                review: queueStats.review + 30,
-            },
-            realtime: {
-                activeRooms,
-                waitingByMode: queueStats,
-                totalWaiting: Object.values(queueStats).reduce((a, b) => a + b, 0),
-            },
-        });
+    const queueStats: Record<string, number> = {}
 
-    } catch (error) {
-        console.error("Stats error:", error);
-        // Fallback
-        res.json({
-            online: 247,
-            totalConnections: 2847293,
-            todayConnections: 12847,
-            byMode: { casual: 50, pitch: 25, collab: 35, hiring: 15, review: 30 },
-            realtime: { activeRooms: 0, waitingByMode: {}, totalWaiting: 0 },
-        });
-    }
-});
+    await Promise.all(
+      modes.map(async (mode) => {
+        const counts = await Promise.all(types.map((type) => redisClient.lLen(`queue:${mode}:${type}`)))
+        queueStats[mode] = counts.reduce((a, b) => a + b, 0)
+      }),
+    )
 
+    const activeRooms = (await redisClient.keys("match:*")).length
+
+    res.json({
+      online: onlineCount + 247,
+      totalConnections: 2847293 + totalConnections,
+      todayConnections: 12847 + todayConnections,
+      byMode: {
+        casual: (queueStats.casual || 0) + 50,
+        pitch: (queueStats.pitch || 0) + 25,
+        collab: (queueStats.collab || 0) + 35,
+        hire: (queueStats.hire || 0) + 15,
+        freelance: (queueStats.freelance || 0) + 20,
+        review: (queueStats.review || 0) + 30,
+      },
+      realtime: {
+        activeRooms,
+        waitingByMode: queueStats,
+        totalWaiting: Object.values(queueStats).reduce((a, b) => a + b, 0),
+      },
+    })
+  } catch (error) {
+    console.error("Stats error:", error)
+    res.json({
+      online: 247,
+      totalConnections: 2847293,
+      todayConnections: 12847,
+      byMode: { casual: 50, pitch: 25, collab: 35, hire: 15, freelance: 20, review: 30 },
+    })
+  }
+})
 
 async function main() {
-  await initRedis()
+  try {
+    await initRedis()
+  } catch (error) {
+    console.error("Failed to connect to Redis:", error)
+    console.log("Starting without Redis adapter (single instance mode)")
+  }
 
   const httpServer = createServer(app)
 
   io = new Server(httpServer, {
     cors: {
-      origin: CORS_ORIGIN,
+      origin: CORS_ORIGIN === "*" ? true : CORS_ORIGIN.split(","),
       methods: ["GET", "POST"],
+      credentials: true,
     },
     transports: ["websocket", "polling"],
+    pingTimeout: 60000,
+    pingInterval: 25000,
   })
 
-  // Use Redis adapter for horizontal scaling
-  io.adapter(createAdapter(pubClient, subClient))
+  // Use Redis adapter for horizontal scaling (if Redis is connected)
+  if (pubClient && subClient) {
+    io.adapter(createAdapter(pubClient, subClient))
+    console.log("Socket.IO Redis adapter enabled")
+  }
 
   // Authentication middleware
   io.use((socket, next) => {
@@ -651,26 +602,47 @@ async function main() {
     console.log(`Client connected: ${sessionId}`)
 
     // Store socket mapping
-    await redisClient.set(getSocketKey(socket.id), sessionId, { EX: 3600 })
+    if (redisClient) {
+      await redisClient.set(getSocketKey(socket.id), sessionId, { EX: 3600 })
+    }
 
     // Event handlers
     socket.on("join-queue", async (data, callback) => {
-      const result = await handleJoinQueue(socket, sessionId, data)
-      callback?.(result)
+      try {
+        const result = await handleJoinQueue(socket, sessionId, data)
+        callback?.(result)
+      } catch (error) {
+        console.error("join-queue error:", error)
+        callback?.({ type: "error", message: "Failed to join queue" })
+      }
     })
 
     socket.on("next", async (data, callback) => {
-      const result = await handleNext(socket, sessionId, data)
-      callback?.(result)
+      try {
+        const result = await handleNext(socket, sessionId, data)
+        callback?.(result)
+      } catch (error) {
+        console.error("next error:", error)
+        callback?.({ type: "error", message: "Failed to skip" })
+      }
     })
 
     socket.on("leave", async (data, callback) => {
-      await handleLeave(socket, sessionId, data)
-      callback?.({ success: true })
+      try {
+        await handleLeave(socket, sessionId, data)
+        callback?.({ success: true })
+      } catch (error) {
+        console.error("leave error:", error)
+        callback?.({ success: false })
+      }
     })
 
     socket.on("signal", async (data) => {
-      await handleSignal(socket, sessionId, data)
+      try {
+        await handleSignal(socket, sessionId, data)
+      } catch (error) {
+        console.error("signal error:", error)
+      }
     })
 
     socket.on("get-stats", () => {
@@ -684,12 +656,17 @@ async function main() {
 
     socket.on("disconnect", async () => {
       console.log(`Client disconnected: ${sessionId}`)
-      await handleDisconnect(socket)
+      try {
+        await handleDisconnect(socket)
+      } catch (error) {
+        console.error("disconnect error:", error)
+      }
     })
   })
 
   httpServer.listen(PORT, () => {
     console.log(`OmniConnect backend running on port ${PORT}`)
+    console.log(`CORS origin: ${CORS_ORIGIN}`)
   })
 }
 
