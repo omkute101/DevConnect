@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const session = await createSession()
 
     // Generate JWT token
-    const token = createSessionToken(session.sessionId)
+    const token = await createSessionToken(session.sessionId)
 
     return NextResponse.json({
       success: true,
