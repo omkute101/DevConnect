@@ -1,6 +1,9 @@
 // OmniConnect Backend Service
 // Node.js + Express + Socket.IO server for real-time matchmaking and WebRTC signaling
 
+import dotenv from "dotenv"
+dotenv.config()
+
 import express from "express"
 import { createServer } from "http"
 import { Server, type Socket } from "socket.io"
