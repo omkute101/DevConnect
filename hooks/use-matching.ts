@@ -105,6 +105,8 @@ export function useMatching(options: UseMatchingOptions = {}) {
   }, [currentMode, currentType])
 
   const startSearching = useCallback(async (mode: AppMode, type: ConnectionType) => {
+    if (state === "searching" || state === "matched") return
+
     setState("searching")
     setCurrentMode(mode)
     setCurrentType(type)
@@ -122,9 +124,11 @@ export function useMatching(options: UseMatchingOptions = {}) {
       setState("matched")
       optionsRef.current.onMatched?.(peer)
     } else if (result.type === "error") {
-      setState("error")
+      setState("idle")
+      setCurrentMode(null)
+      setCurrentType(null)
     }
-  }, [])
+  }, [state])
 
   const cancelSearch = useCallback(async () => {
     await signalingRef.current.leaveQueue()

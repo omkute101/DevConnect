@@ -307,7 +307,15 @@ class SignalingService {
           }),
         })
 
-        if (!response.ok) return
+        if (!response.ok) {
+          if (response.status === 403) {
+            // We were kicked out or room is invalid
+            this.stopSignalPolling()
+            this.onMatchCallback?.({ success: true, type: "left" }) // Use "left" to reset UI
+            return
+          }
+          return
+        }
 
         const data = await response.json()
 
