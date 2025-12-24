@@ -36,8 +36,11 @@ interface Match {
 // Environment variables
 const PORT = process.env.PORT || 8080
 const REDIS_URL = process.env.REDIS_URL || process.env.KV_URL || "redis://localhost:6379"
-const JWT_SECRET = process.env.SESSION_SECRET || "omniconnect-anonymous-session-secret-2024"
+const JWT_SECRET = process.env.SESSION_SECRET || process.env.JWT_SECRET || "omniconnect-anonymous-session-secret-2024"
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*"
+
+// Log JWT secret hash for debugging (not the actual secret)
+console.log("JWT Secret configured (length):", JWT_SECRET.length)
 
 // App Setup
 const app = express()
@@ -150,13 +153,16 @@ function createSessionToken(sessionId: string): string {
 
 function verifyToken(token: string): SessionData | null {
   try {
+    console.log("Verifying token, first 20 chars:", token.substring(0, 20) + "...")
     const decoded = jwt.verify(token, JWT_SECRET) as SessionData
+    console.log("Token verified successfully for session:", decoded.sessionId)
     return decoded
   } catch (error) {
     if (error instanceof jwt.TokenExpiredError) {
       console.log("Token expired")
     } else if (error instanceof jwt.JsonWebTokenError) {
       console.log("Invalid token:", error.message)
+      console.log("Token structure check - parts:", token.split(".").length)
     } else {
       console.error("Token verification error:", error)
     }
@@ -488,21 +494,40 @@ app.get("/health", (req, res) => {
   res.status(200).json({ status: "ok", uptime: process.uptime() })
 })
 
+// Session init endpoint so backend can issue tokens directly
 app.post("/api/session/init", async (req, res) => {
   try {
-    const session = await createSession()
-    const token = createSessionToken(session.sessionId)
+    const { sessionId } = await createSession()
+    const token = createSessionToken(sessionId)
+
+    console.log("Created new session:", sessionId)
 
     res.json({
-      success: true,
-      sessionId: session.sessionId,
       token,
+      sessionId,
       expiresIn: 86400, // 24 hours
     })
   } catch (error) {
     console.error("Session init error:", error)
-    res.status(500).json({ success: false, error: "Failed to create session" })
+    res.status(500).json({ error: "Failed to create session" })
   }
+})
+
+// Endpoint to verify token (for debugging)
+app.post("/api/session/verify", (req, res) => {
+  const authHeader = req.headers.authorization
+  const token = authHeader?.replace("Bearer ", "")
+
+  if (!token) {
+    return res.status(401).json({ valid: false, error: "No token provided" })
+  }
+
+  const decoded = verifyToken(token)
+  if (!decoded) {
+    return res.status(401).json({ valid: false, error: "Invalid token" })
+  }
+
+  res.json({ valid: true, sessionId: decoded.sessionId })
 })
 
 // Stats endpoint

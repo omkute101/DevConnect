@@ -130,11 +130,21 @@ class SignalingService {
 
     for (let i = 0; i < retries; i++) {
       try {
-        // The backend will verify this token using the same SECRET
-        const response = await fetch("/api/session/init", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-        })
+        // This ensures the same SECRET is used for signing and verification
+        let response: Response
+
+        try {
+          response = await fetch(`${this.backendUrl}/api/session/init`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          })
+        } catch {
+          // Backend not reachable, fall back to Next.js API
+          response = await fetch("/api/session/init", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+          })
+        }
 
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}`)
@@ -142,14 +152,18 @@ class SignalingService {
 
         const data = await response.json()
 
-        if (!data.success) {
+        const sessionId = data.sessionId
+        const token = data.token
+        const expiresIn = data.expiresIn || 86400
+
+        if (!sessionId || !token) {
           throw new Error(data.error || "Failed to create session")
         }
 
         const sessionData: SessionData = {
-          sessionId: data.sessionId,
-          token: data.token,
-          expiresAt: Date.now() + data.expiresIn * 1000,
+          sessionId,
+          token,
+          expiresAt: Date.now() + expiresIn * 1000,
         }
 
         this.storage.setItem("omniconnect-session", JSON.stringify(sessionData))
