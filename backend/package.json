@@ -1,0 +1,23 @@
+{
+  "name": "omniconnect-backend",
+  "version": "1.0.0",
+  "description": "OmniConnect real-time backend service",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn src/index.ts"
+  },
+  "dependencies": {
+    "@socket.io/redis-adapter": "^8.3.0",
+    "jsonwebtoken": "^9.0.2",
+    "redis": "^4.6.13",
+    "socket.io": "^4.7.4"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.6",
+    "@types/node": "^20.11.24",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.3.3"
+  }
+}

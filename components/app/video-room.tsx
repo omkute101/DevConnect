@@ -114,23 +114,6 @@ export function VideoRoom({
     }
   }, [])
 
-  const renegotiate = useCallback(async () => {
-    const pc = peerConnectionRef.current
-    const signaling = getSignalingService()
-    if (!pc || !roomId || !peerId) return
-
-    try {
-      const offer = await pc.createOffer()
-      await pc.setLocalDescription(offer)
-      await signaling.sendSignal(roomId, peerId, {
-        type: "offer",
-        payload: offer,
-      })
-    } catch (error) {
-      console.error("Renegotiation failed:", error)
-    }
-  }, [roomId, peerId])
-
   const toggleVideo = useCallback(async () => {
     if (localStream) {
       const videoTracks = localStream.getVideoTracks()
@@ -140,8 +123,7 @@ export function VideoRoom({
         })
         setIsVideoEnabled(!isVideoEnabled)
       }
-    } else if (!localStream) {
-      // If no local stream (e.g. started in chat mode), get one
+    } else if (type === "video" && permissionsDenied) {
       const stream = await getLocalStream(isFrontCamera)
       if (stream) {
         setLocalStream(stream)
@@ -150,19 +132,15 @@ export function VideoRoom({
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream
         }
-        
         const pc = peerConnectionRef.current
         if (pc) {
           stream.getTracks().forEach((track) => {
             pc.addTrack(track, stream)
           })
-          
-          // Trigger renegotiation since we added tracks
-          await renegotiate()
         }
       }
     }
-  }, [localStream, isVideoEnabled, getLocalStream, isFrontCamera, renegotiate])
+  }, [localStream, isVideoEnabled, type, permissionsDenied, getLocalStream, isFrontCamera])
 
   const toggleAudio = useCallback(async () => {
     if (localStream) {
@@ -173,8 +151,7 @@ export function VideoRoom({
         })
         setIsAudioEnabled(!isAudioEnabled)
       }
-    } else if (!localStream) {
-       // If no local stream (e.g. started in chat mode), get one
+    } else if (type === "video" && permissionsDenied) {
       const stream = await getLocalStream(isFrontCamera)
       if (stream) {
         setLocalStream(stream)
@@ -183,19 +160,15 @@ export function VideoRoom({
         if (localVideoRef.current) {
           localVideoRef.current.srcObject = stream
         }
-        
         const pc = peerConnectionRef.current
         if (pc) {
           stream.getTracks().forEach((track) => {
             pc.addTrack(track, stream)
           })
-          
-          // Trigger renegotiation since we added tracks
-          await renegotiate()
         }
       }
     }
-  }, [localStream, isAudioEnabled, getLocalStream, isFrontCamera, renegotiate])
+  }, [localStream, isAudioEnabled, type, permissionsDenied, getLocalStream, isFrontCamera])
 
   const flipCamera = useCallback(async () => {
     if (!localStream) return
@@ -215,27 +188,15 @@ export function VideoRoom({
       const pc = peerConnectionRef.current
       if (pc) {
         const senders = pc.getSenders()
-        const videoSender = senders.find((s) => s.track?.kind === "video")
-        const newVideoTrack = newStream.getVideoTracks()[0]
-        
-        if (videoSender && newVideoTrack) {
-            await videoSender.replaceTrack(newVideoTrack)
-        } else if (!videoSender && newVideoTrack) {
-             // If there was no video sender before (rare but possible), add track and renegotiate
-             pc.addTrack(newVideoTrack, newStream)
-             await renegotiate()
+        for (const track of newStream.getTracks()) {
+          const sender = senders.find((s) => s.track?.kind === track.kind)
+          if (sender) {
+            await sender.replaceTrack(track)
+          }
         }
-        
-        // Also update audio track if needed, though usually audio device doesn't change with camera flip
-        // ensuring we keep the audio track from the new stream essentially
-         const audioSender = senders.find((s) => s.track?.kind === "audio")
-         const newAudioTrack = newStream.getAudioTracks()[0]
-         if (audioSender && newAudioTrack) {
-             await audioSender.replaceTrack(newAudioTrack)
-         }
       }
     }
-  }, [localStream, isFrontCamera, getLocalStream, renegotiate])
+  }, [localStream, isFrontCamera, getLocalStream])
 
   // Set up signal handler
   useEffect(() => {

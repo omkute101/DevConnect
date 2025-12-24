@@ -16,6 +16,7 @@ interface MatchedPeer {
 interface UseMatchingOptions {
   onMatched?: (peer: MatchedPeer) => void
   onPeerLeft?: () => void
+  onPeerSkipped?: () => void
 }
 
 export function useMatching(options: UseMatchingOptions = {}) {
@@ -27,13 +28,13 @@ export function useMatching(options: UseMatchingOptions = {}) {
   const [isSessionReady, setIsSessionReady] = useState(false)
 
   const signalingRef = useRef(getSignalingService())
-  const statsIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const optionsRef = useRef(options)
 
   useEffect(() => {
     optionsRef.current = options
   }, [options])
 
+  // Initialize session
   useEffect(() => {
     const initSession = async () => {
       try {
@@ -47,24 +48,29 @@ export function useMatching(options: UseMatchingOptions = {}) {
     initSession()
   }, [])
 
+  // Set up stats listener
   useEffect(() => {
+    const signaling = signalingRef.current
+
+    signaling.onStats((stats) => {
+      setOnlineCount(stats.online)
+    })
+
+    // Fetch initial stats
     const fetchStats = async () => {
-      const stats = await signalingRef.current.getStats()
+      const stats = await signaling.getStats()
       if (stats) {
         setOnlineCount(stats.online)
       }
     }
 
     fetchStats()
-    statsIntervalRef.current = setInterval(fetchStats, 10000)
+    const interval = setInterval(fetchStats, 30000) // Less frequent since we have socket updates
 
-    return () => {
-      if (statsIntervalRef.current) {
-        clearInterval(statsIntervalRef.current)
-      }
-    }
+    return () => clearInterval(interval)
   }, [])
 
+  // Set up match event listeners
   useEffect(() => {
     const signaling = signalingRef.current
 
@@ -80,33 +86,20 @@ export function useMatching(options: UseMatchingOptions = {}) {
         setState("matched")
         optionsRef.current.onMatched?.(peer)
       } else if (result.type === "left") {
+        // Peer clicked leave - we should continue searching
         setMatchedPeer(null)
         setState("searching")
         optionsRef.current.onPeerLeft?.()
-
-        // Automatically rejoin the queue for immediate rematch
-        if (currentMode && currentType) {
-          signalingRef.current.joinQueue(currentMode, currentType).then((newResult) => {
-            if (newResult.type === "matched" && newResult.peerId && newResult.roomId) {
-              const peer: MatchedPeer = {
-                id: newResult.peerId,
-                roomId: newResult.roomId,
-                mode: currentMode,
-                isInitiator: newResult.isInitiator ?? false,
-              }
-              setMatchedPeer(peer)
-              setState("matched")
-              optionsRef.current.onMatched?.(peer)
-            }
-          })
-        }
+      } else if (result.type === "skipped") {
+        // Peer clicked next - we should also go to searching
+        setMatchedPeer(null)
+        setState("searching")
+        optionsRef.current.onPeerSkipped?.()
       }
     })
-  }, [currentMode, currentType])
+  }, [currentMode])
 
   const startSearching = useCallback(async (mode: AppMode, type: ConnectionType) => {
-    if (state === "searching" || state === "matched") return
-
     setState("searching")
     setCurrentMode(mode)
     setCurrentType(type)
@@ -124,11 +117,10 @@ export function useMatching(options: UseMatchingOptions = {}) {
       setState("matched")
       optionsRef.current.onMatched?.(peer)
     } else if (result.type === "error") {
-      setState("idle")
-      setCurrentMode(null)
-      setCurrentType(null)
+      setState("error")
     }
-  }, [state])
+    // If waiting, socket will notify us when matched
+  }, [])
 
   const cancelSearch = useCallback(async () => {
     await signalingRef.current.leaveQueue()
@@ -156,6 +148,7 @@ export function useMatching(options: UseMatchingOptions = {}) {
         setState("matched")
         optionsRef.current.onMatched?.(peer)
       }
+      // If waiting, socket will notify us when matched
     }
   }, [currentMode, currentType, matchedPeer?.roomId])
 
@@ -167,6 +160,7 @@ export function useMatching(options: UseMatchingOptions = {}) {
     setMatchedPeer(null)
   }, [])
 
+  // Cleanup on unmount
   useEffect(() => {
     const handleBeforeUnload = () => {
       signalingRef.current.leaveQueue().catch(() => {})

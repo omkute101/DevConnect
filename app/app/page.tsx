@@ -1,7 +1,6 @@
 "use client"
 
 import { useState, useCallback, useEffect } from "react"
-import { useRouter } from "next/navigation"
 import { ModeSelection } from "@/components/app/mode-selection"
 import { MatchingScreen } from "@/components/app/matching-screen"
 import { VideoRoom } from "@/components/app/video-room"
@@ -20,7 +19,6 @@ export interface MediaPermissions {
 }
 
 export default function AppPage() {
-  const router = useRouter()
   const [appState, setAppState] = useState<AppState>("loading")
   const [peerLeftMessage, setPeerLeftMessage] = useState<string | null>(null)
   const [mediaPermissions, setMediaPermissions] = useState<MediaPermissions | null>(null)
@@ -32,6 +30,11 @@ export default function AppPage() {
 
   const onPeerLeft = useCallback(() => {
     setPeerLeftMessage("The developer has left... Don't worry, we'll connect you to new developers!")
+    setAppState("matching")
+  }, [])
+
+  const onPeerSkipped = useCallback(() => {
+    setPeerLeftMessage("Your peer moved on... Finding you a new match!")
     setAppState("matching")
   }, [])
 
@@ -48,6 +51,7 @@ export default function AppPage() {
   } = useMatching({
     onMatched,
     onPeerLeft,
+    onPeerSkipped,
   })
 
   useEffect(() => {
@@ -83,9 +87,8 @@ export default function AppPage() {
 
   const handleLeave = useCallback(async () => {
     await leaveMatch()
-    // Redirect to home smoothly
-    router.push("/")
-  }, [leaveMatch, router])
+    window.location.href = "/"
+  }, [leaveMatch])
 
   if (appState === "loading") {
     return (

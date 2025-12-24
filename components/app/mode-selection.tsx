@@ -52,7 +52,6 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
   const [step, setStep] = useState<"type" | "mode">("type")
   const [selectedType, setSelectedType] = useState<ConnectionType | null>(null)
   const [isRequestingPermissions, setIsRequestingPermissions] = useState(false)
-  const [isConnecting, setIsConnecting] = useState(false)
 
   const handleTypeSelect = async (type: ConnectionType) => {
     if (type === "video") {
@@ -79,8 +78,7 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
   }
 
   const handleModeSelect = async (mode: AppMode) => {
-    if (selectedType && !isConnecting) {
-      setIsConnecting(true)
+    if (selectedType) {
       let permissions: MediaPermissions | undefined
 
       if (selectedType === "video") {
@@ -179,8 +177,7 @@ export function ModeSelection({ onSelect }: ModeSelectionProps) {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: i * 0.05, duration: 0.4 }}
                   onClick={() => handleModeSelect(mode.id)}
-                  disabled={isConnecting}
-                  className="group relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5 text-left transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background disabled:opacity-50 disabled:pointer-events-none"
+                  className="group relative overflow-hidden rounded-xl border border-border bg-card p-4 sm:p-5 text-left transition-all hover:border-foreground/30 hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 focus:ring-offset-background"
                 >
                   <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-lg bg-secondary transition-colors group-hover:bg-foreground/20">
                     <mode.icon className="h-5 w-5 text-foreground" />

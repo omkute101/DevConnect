@@ -1,6 +1,7 @@
-// Signaling service with HTTP polling for Vercel serverless deployment
-// Handles session initialization, matching, and WebRTC signaling
+// Socket.IO-based signaling service for external backend architecture
+// Connects to external Node.js + Socket.IO server for real-time matchmaking
 
+import { io, type Socket } from "socket.io-client"
 import type { AppMode, ConnectionType } from "@/app/app/page"
 
 export interface MatchResult {
@@ -25,6 +26,11 @@ interface SessionData {
   expiresAt: number
 }
 
+export interface WebRTCSignal {
+  type: "offer" | "answer" | "ice-candidate"
+  payload: RTCSessionDescriptionInit | RTCIceCandidateInit
+}
+
 function safeStorage() {
   return {
     getItem: (key: string): string | null => {
@@ -33,7 +39,7 @@ function safeStorage() {
           return localStorage.getItem(key)
         }
       } catch {
-        // Storage access blocked
+        // Storage access blocked in iframe
       }
       return null
     },
@@ -58,25 +64,31 @@ function safeStorage() {
   }
 }
 
-export interface WebRTCSignal {
-  type: "offer" | "answer" | "ice-candidate"
-  payload: RTCSessionDescriptionInit | RTCIceCandidateInit
-}
-
 class SignalingService {
   private session: SessionData | null = null
   private sessionPromise: Promise<SessionData> | null = null
+  private socket: Socket | null = null
+  private storage = safeStorage()
+
+  // Callbacks
   private onMatchCallback: ((result: MatchResult) => void) | null = null
   private onSignalCallback: ((signal: WebRTCSignal, fromId: string) => void) | null = null
+  private onStatsCallback: ((stats: PlatformStats) => void) | null = null
+
+  // Current state
   private currentRoomId: string | null = null
   private currentMode: AppMode | null = null
   private currentType: ConnectionType | null = null
-  private storage = safeStorage()
+  private isConnected = false
 
-  // Polling intervals
-  private matchPollInterval: ReturnType<typeof setInterval> | null = null
-  private signalPollInterval: ReturnType<typeof setInterval> | null = null
-  private isPolling = false
+  // Backend URL - configurable via environment variable
+  private backendUrl: string
+
+  constructor() {
+    // In production, this should be your deployed Socket.IO backend URL
+    // e.g., https://your-backend.fly.dev or wss://your-backend.railway.app
+    this.backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001"
+  }
 
   async initSession(): Promise<SessionData> {
     // Return existing session if valid
@@ -103,7 +115,7 @@ class SignalingService {
       }
     }
 
-    // Create new session with retry logic
+    // Create new session
     this.sessionPromise = this.createNewSession()
 
     try {
@@ -144,7 +156,6 @@ class SignalingService {
         return sessionData
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Unknown error")
-        // Wait before retry with exponential backoff
         if (i < retries - 1) {
           await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)))
         }
@@ -154,206 +165,123 @@ class SignalingService {
     throw lastError || new Error("Failed to create session after retries")
   }
 
-  private async getAuthHeaders(): Promise<Record<string, string>> {
-    const session = await this.initSession()
-    return {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${session.token}`,
+  private async connectSocket(): Promise<void> {
+    if (this.socket?.connected) {
+      return
     }
+
+    const session = await this.initSession()
+
+    return new Promise((resolve, reject) => {
+      this.socket = io(this.backendUrl, {
+        auth: {
+          token: session.token,
+        },
+        transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000,
+        timeout: 10000,
+      })
+
+      this.socket.on("connect", () => {
+        this.isConnected = true
+        resolve()
+      })
+
+      this.socket.on("connect_error", (error) => {
+        console.error("Socket connection error:", error.message)
+        reject(error)
+      })
+
+      this.socket.on("disconnect", (reason) => {
+        this.isConnected = false
+        if (reason === "io server disconnect") {
+          // Server disconnected us, try to reconnect
+          this.socket?.connect()
+        }
+      })
+
+      // Handle match events
+      this.socket.on("matched", (data: { roomId: string; peerId: string; isInitiator: boolean }) => {
+        this.currentRoomId = data.roomId
+        this.onMatchCallback?.({
+          success: true,
+          type: "matched",
+          roomId: data.roomId,
+          peerId: data.peerId,
+          isInitiator: data.isInitiator,
+        })
+      })
+
+      this.socket.on("peer-left", () => {
+        this.onMatchCallback?.({ success: true, type: "left" })
+      })
+
+      this.socket.on("peer-skipped", () => {
+        // Peer clicked next, we should also be put back in queue
+        this.onMatchCallback?.({ success: true, type: "skipped" })
+      })
+
+      // Handle WebRTC signaling events
+      this.socket.on("signal", (data: { signal: WebRTCSignal; fromId: string }) => {
+        this.onSignalCallback?.(data.signal, data.fromId)
+      })
+
+      // Handle stats updates
+      this.socket.on("stats", (stats: PlatformStats) => {
+        this.onStatsCallback?.(stats)
+      })
+
+      // Handle errors
+      this.socket.on("error", (error: { message: string }) => {
+        console.error("Socket error:", error.message)
+        this.onMatchCallback?.({ success: false, type: "error", message: error.message })
+      })
+
+      // Handle auth errors
+      this.socket.on("auth-error", async () => {
+        // Clear session and try to reconnect with new token
+        this.session = null
+        this.storage.removeItem("omniconnect-session")
+        this.socket?.disconnect()
+        try {
+          await this.connectSocket()
+        } catch (e) {
+          console.error("Failed to reconnect after auth error:", e)
+        }
+      })
+    })
   }
 
   async joinQueue(mode: AppMode, type: ConnectionType): Promise<MatchResult> {
     try {
-      const headers = await this.getAuthHeaders()
+      await this.connectSocket()
+
       this.currentMode = mode
       this.currentType = type
 
-      const response = await fetch("/api/signaling", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          action: "join-queue",
-          mode,
-          type,
-        }),
-      })
-
-      if (!response.ok) {
-        // If unauthorized, clear session and retry once
-        if (response.status === 401) {
-          this.session = null
-          this.storage.removeItem("omniconnect-session")
-          const newHeaders = await this.getAuthHeaders()
-          const retryResponse = await fetch("/api/signaling", {
-            method: "POST",
-            headers: newHeaders,
-            body: JSON.stringify({
-              action: "join-queue",
-              mode,
-              type,
-            }),
-          })
-
-          if (!retryResponse.ok) {
-            return { success: false, type: "error", message: "Authentication failed" }
-          }
-
-          const retryData = await retryResponse.json()
-          return this.handleJoinQueueResponse(retryData, mode)
-        }
-
-        return { success: false, type: "error", message: `HTTP ${response.status}` }
-      }
-
-      const data = await response.json()
-      return this.handleJoinQueueResponse(data, mode)
-    } catch (error) {
-      console.error("Failed to join queue:", error)
-      return { success: false, type: "error", message: "Failed to connect" }
-    }
-  }
-
-  private handleJoinQueueResponse(
-    data: {
-      success: boolean
-      matched?: boolean
-      roomId?: string
-      peerId?: string
-      isInitiator?: boolean
-      error?: string
-    },
-    mode: AppMode,
-  ): MatchResult {
-    if (!data.success) {
-      return { success: false, type: "error", message: data.error }
-    }
-
-    if (data.matched) {
-      this.currentRoomId = data.roomId!
-      this.startSignalPolling()
-      return {
-        success: true,
-        type: "matched",
-        roomId: data.roomId,
-        peerId: data.peerId,
-        isInitiator: data.isInitiator,
-      }
-    }
-
-    // Start polling for match
-    this.startMatchPolling()
-    return { success: true, type: "waiting" }
-  }
-
-  private startMatchPolling() {
-    if (this.matchPollInterval) return
-
-    this.isPolling = true
-    this.matchPollInterval = setInterval(async () => {
-      if (!this.isPolling) return
-
-      try {
-        const headers = await this.getAuthHeaders()
-        const response = await fetch("/api/signaling", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ action: "check-match" }),
-        })
-
-        if (!response.ok) return
-
-        const data = await response.json()
-
-        if (data.matched && data.roomId) {
-          this.stopMatchPolling()
-          this.currentRoomId = data.roomId
-          this.startSignalPolling()
-
-          this.onMatchCallback?.({
-            success: true,
-            type: "matched",
-            roomId: data.roomId,
-            peerId: data.peerId,
-            isInitiator: data.isInitiator,
-          })
-        }
-      } catch (error) {
-        console.error("Match poll error:", error)
-      }
-    }, 1000)
-  }
-
-  private stopMatchPolling() {
-    if (this.matchPollInterval) {
-      clearInterval(this.matchPollInterval)
-      this.matchPollInterval = null
-    }
-  }
-
-  private startSignalPolling() {
-    if (this.signalPollInterval) return
-
-    this.signalPollInterval = setInterval(async () => {
-      // Ensure we're still in the room we started polling for
-      if (!this.currentRoomId) {
-        this.stopSignalPolling()
-        return
-      }
-
-      try {
-        const headers = await this.getAuthHeaders()
-        const response = await fetch("/api/signaling", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            action: "get-signals",
-            roomId: this.currentRoomId,
-          }),
-        })
-
-        if (!response.ok) {
-          if (response.status === 403) {
-            console.warn("Received 403 for room", this.currentRoomId, "stopping polling")
-            // We were kicked out or room is invalid
-            this.stopSignalPolling()
-            
-            // Only notify if we haven't already cleaned up
-            if (this.currentRoomId) {
-              this.currentRoomId = null
-              this.onMatchCallback?.({ success: true, type: "left" })
-            }
-            return
-          }
+      return new Promise((resolve) => {
+        if (!this.socket) {
+          resolve({ success: false, type: "error", message: "Socket not connected" })
           return
         }
 
-        // Double check room didn't change while we were fetching
-        if (!this.currentRoomId) return
-
-        const data = await response.json()
-
-        if (data.signals && Array.isArray(data.signals)) {
-          for (const item of data.signals) {
-            if (item.signal && item.fromId) {
-              this.onSignalCallback?.(item.signal, item.fromId)
-            }
+        this.socket.emit("join-queue", { mode, connectionType: type }, (response: MatchResult) => {
+          if (response.type === "matched" && response.roomId) {
+            this.currentRoomId = response.roomId
           }
-        }
+          resolve(response)
+        })
 
-        // Check if peer left
-        if (data.peerLeft) {
-          this.onMatchCallback?.({ success: true, type: "left" })
-        }
-      } catch (error) {
-        console.error("Signal poll error:", error)
-      }
-    }, 300)
-  }
-
-  private stopSignalPolling() {
-    if (this.signalPollInterval) {
-      clearInterval(this.signalPollInterval)
-      this.signalPollInterval = null
+        // Timeout after 5 seconds
+        setTimeout(() => {
+          resolve({ success: true, type: "waiting" })
+        }, 5000)
+      })
+    } catch (error) {
+      console.error("Failed to join queue:", error)
+      return { success: false, type: "error", message: "Failed to connect" }
     }
   }
 
@@ -365,107 +293,73 @@ class SignalingService {
     this.onSignalCallback = callback
   }
 
+  onStats(callback: (stats: PlatformStats) => void) {
+    this.onStatsCallback = callback
+  }
+
   async leaveQueue(): Promise<void> {
-    this.isPolling = false
-    this.stopMatchPolling()
-    this.stopSignalPolling()
+    if (!this.socket?.connected) return
 
-    if (!this.currentRoomId) {
-      this.currentMode = null
-      this.currentType = null
-      return
-    }
-
-    try {
-      const headers = await this.getAuthHeaders()
-      await fetch("/api/signaling", {
-        method: "POST",
-        headers,
-        keepalive: true,
-        body: JSON.stringify({
-          action: "leave",
-          roomId: this.currentRoomId,
-        }),
+    return new Promise((resolve) => {
+      this.socket!.emit("leave", { roomId: this.currentRoomId }, () => {
+        this.currentRoomId = null
+        this.currentMode = null
+        this.currentType = null
+        resolve()
       })
-    } catch {
-      // Ignore errors on leave
-    }
 
-    this.currentRoomId = null
-    this.currentMode = null
-    this.currentType = null
+      // Resolve anyway after timeout
+      setTimeout(resolve, 1000)
+    })
   }
 
   async skip(roomId: string, mode: AppMode, type: ConnectionType): Promise<MatchResult> {
-    this.stopSignalPolling()
+    if (!this.socket?.connected) {
+      return { success: false, type: "error", message: "Socket not connected" }
+    }
 
-    try {
-      const headers = await this.getAuthHeaders()
-      const response = await fetch("/api/signaling", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          action: "skip",
-          roomId,
-          mode,
-          type,
-        }),
+    return new Promise((resolve) => {
+      this.socket!.emit("next", { roomId, mode, connectionType: type }, (response: MatchResult) => {
+        if (response.type === "matched" && response.roomId) {
+          this.currentRoomId = response.roomId
+        }
+        resolve(response)
       })
 
-      if (!response.ok) {
-        return { success: false, type: "error", message: `HTTP ${response.status}` }
-      }
-
-      const data = await response.json()
-
-      if (data.matched) {
-        this.currentRoomId = data.roomId
-        this.startSignalPolling()
-        return {
-          success: true,
-          type: "matched",
-          roomId: data.roomId,
-          peerId: data.peerId,
-          isInitiator: data.isInitiator,
-        }
-      }
-
-      // Start polling for new match
-      this.startMatchPolling()
-      return { success: true, type: "waiting" }
-    } catch (error) {
-      console.error("Skip error:", error)
-      return { success: false, type: "error", message: "Failed to skip" }
-    }
+      // Timeout - return waiting state
+      setTimeout(() => {
+        resolve({ success: true, type: "waiting" })
+      }, 5000)
+    })
   }
 
   async sendSignal(roomId: string, targetId: string, signal: WebRTCSignal): Promise<void> {
-    try {
-      const headers = await this.getAuthHeaders()
-      await fetch("/api/signaling", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          action: "signal",
-          roomId,
-          targetId,
-          signal,
-        }),
-      })
-    } catch (error) {
-      console.error("Failed to send signal:", error)
-    }
+    if (!this.socket?.connected) return
+
+    this.socket.emit("signal", {
+      roomId,
+      targetId,
+      signal,
+    })
   }
 
   async getStats(): Promise<PlatformStats | null> {
+    // Request stats from socket
+    if (this.socket?.connected) {
+      this.socket.emit("get-stats")
+    }
+
+    // Also try HTTP endpoint as fallback
     try {
       const response = await fetch("/api/stats")
-      if (!response.ok) return null
-      const data = await response.json()
-      return data
+      if (response.ok) {
+        return await response.json()
+      }
     } catch {
-      return null
+      // Ignore
     }
+
+    return null
   }
 
   getCurrentSessionId(): string | null {
@@ -476,14 +370,20 @@ class SignalingService {
     return this.currentRoomId
   }
 
+  isSocketConnected(): boolean {
+    return this.isConnected
+  }
+
   destroy() {
-    this.stopMatchPolling()
-    this.stopSignalPolling()
+    this.socket?.disconnect()
+    this.socket = null
     this.onMatchCallback = null
     this.onSignalCallback = null
+    this.onStatsCallback = null
     this.currentRoomId = null
     this.currentMode = null
     this.currentType = null
+    this.isConnected = false
   }
 }
 

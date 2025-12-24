@@ -45,53 +45,30 @@ export function useWebRTC(options: UseWebRTCOptions = {}) {
         return
       }
 
-      if (pc.signalingState === "closed" || pc.connectionState === "closed") {
-        console.log("[v0] Peer connection is closed, ignoring signal")
-        return
-      }
-
       try {
         if (signal.type === "offer") {
           console.log("[v0] Processing offer, current signalingState:", pc.signalingState)
-          if (pc.signalingState !== "stable" && pc.signalingState !== "have-local-offer") {
-             // In some race conditions we might get an offer when we're not ready, but usually 'stable' is expected for initial,
-             // or 'have-local-offer' if we both offered (glare). 
-             // Simplest mitigation for now is proceeding but catching errors.
-          }
-          
           await pc.setRemoteDescription(new RTCSessionDescription(signal.payload as RTCSessionDescriptionInit))
 
           // Process pending candidates
           console.log("[v0] Processing", pendingCandidatesRef.current.length, "pending ICE candidates")
           for (const candidate of pendingCandidatesRef.current) {
-            try {
-            try {
-              if ((pc.signalingState as string) !== "closed") {
-                await pc.addIceCandidate(new RTCIceCandidate(candidate))
-              }
-            } catch (e) {
-               console.warn("[v0] Error adding pending candidate:", e)
-            }
-            } catch (e) {
-               console.warn("[v0] Error adding pending candidate:", e)
-            }
+            await pc.addIceCandidate(new RTCIceCandidate(candidate))
           }
           pendingCandidatesRef.current = []
 
           // Create and send answer
-          if ((pc.signalingState as string) !== "closed") {
-            const answer = await pc.createAnswer()
-            await pc.setLocalDescription(answer)
-            console.log("[v0] Created and set answer")
+          const answer = await pc.createAnswer()
+          await pc.setLocalDescription(answer)
+          console.log("[v0] Created and set answer")
 
-            const roomId = roomIdRef.current
-            if (roomId) {
-              await signaling.sendSignal(roomId, fromId, {
-                type: "answer",
-                payload: answer,
-              })
-              console.log("[v0] Sent answer to", fromId)
-            }
+          const roomId = roomIdRef.current
+          if (roomId) {
+            await signaling.sendSignal(roomId, fromId, {
+              type: "answer",
+              payload: answer,
+            })
+            console.log("[v0] Sent answer to", fromId)
           }
         } else if (signal.type === "answer") {
           console.log("[v0] Processing answer, current signalingState:", pc.signalingState)
@@ -101,13 +78,7 @@ export function useWebRTC(options: UseWebRTCOptions = {}) {
 
             // Process pending candidates
             for (const candidate of pendingCandidatesRef.current) {
-              try {
-                if ((pc.signalingState as string) !== "closed") {
-                   await pc.addIceCandidate(new RTCIceCandidate(candidate))
-                }
-              } catch (e) {
-                console.warn("[v0] Error adding pending candidate:", e)
-              }
+              await pc.addIceCandidate(new RTCIceCandidate(candidate))
             }
             pendingCandidatesRef.current = []
           }
@@ -115,13 +86,7 @@ export function useWebRTC(options: UseWebRTCOptions = {}) {
           const candidate = signal.payload as RTCIceCandidateInit
           if (pc.remoteDescription && pc.remoteDescription.type) {
             console.log("[v0] Adding ICE candidate directly")
-            try {
-               if ((pc.signalingState as string) !== "closed") {
-                 await pc.addIceCandidate(new RTCIceCandidate(candidate))
-               }
-            } catch (e) {
-                console.warn("[v0] Error adding ICE candidate:", e)
-            }
+            await pc.addIceCandidate(new RTCIceCandidate(candidate))
           } else {
             console.log("[v0] Queueing ICE candidate")
             pendingCandidatesRef.current.push(candidate)
@@ -168,8 +133,6 @@ export function useWebRTC(options: UseWebRTCOptions = {}) {
         rtcConfig,
         async (candidate) => {
           // Send ICE candidate to peer via signaling
-          if (peerConnectionRef.current?.signalingState === "closed") return
-          
           console.log("[v0] Sending ICE candidate to", peerId)
           await signaling.sendSignal(roomId, peerId, {
             type: "ice-candidate",
@@ -231,21 +194,15 @@ export function useWebRTC(options: UseWebRTCOptions = {}) {
 
       if (isInitiator) {
         console.log("[v0] Creating offer (initiator)")
-        try {
-          const offer = await pc.createOffer()
-          if ((pc.signalingState as string) !== "closed") {
-            await pc.setLocalDescription(offer)
-            console.log("[v0] Set local description (offer)")
+        const offer = await pc.createOffer()
+        await pc.setLocalDescription(offer)
+        console.log("[v0] Set local description (offer)")
 
-            await signaling.sendSignal(roomId, peerId, {
-              type: "offer",
-              payload: offer,
-            })
-            console.log("[v0] Sent offer to", peerId)
-          }
-        } catch (e) {
-          console.error("Error creating/sending offer:", e)
-        }
+        await signaling.sendSignal(roomId, peerId, {
+          type: "offer",
+          payload: offer,
+        })
+        console.log("[v0] Sent offer to", peerId)
       }
 
       return pc
