@@ -17,6 +17,8 @@ import {
   Share2,
   User,
   AlertTriangle,
+  Volume2,
+  VolumeX,
 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import type { AppMode, ConnectionType, MediaPermissions } from "@/app/app/page"
@@ -75,6 +77,7 @@ export function VideoRoom({
   const [showDisconnectWarning, setShowDisconnectWarning] = useState(false)
   const [disconnectReason, setDisconnectReason] = useState("")
   const [permissionsDenied, setPermissionsDenied] = useState(initialPermissions?.denied ?? false)
+  const [isRemoteAudioMuted, setIsRemoteAudioMuted] = useState(false)
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
   const remoteVideoRef = useRef<HTMLVideoElement>(null)
@@ -168,6 +171,13 @@ export function VideoRoom({
     }
   }, [localStream, isAudioEnabled, type, permissionsDenied, getLocalStream])
 
+  const toggleRemoteAudio = useCallback(() => {
+    if (remoteVideoRef.current) {
+      remoteVideoRef.current.muted = !isRemoteAudioMuted
+      setIsRemoteAudioMuted(!isRemoteAudioMuted)
+    }
+  }, [isRemoteAudioMuted])
+
   // Set up signal handler
   useEffect(() => {
     const signaling = getSignalingService()
@@ -175,16 +185,21 @@ export function VideoRoom({
     const handleSignal = async (signal: WebRTCSignal, fromId: string) => {
       const pc = peerConnectionRef.current
       if (!pc) {
+        console.log("[v0] Signal received but no peer connection")
         return
       }
+
+      console.log("[v0] Received signal:", signal.type, "from:", fromId)
 
       try {
         if (signal.type === "offer") {
           if (pc.signalingState !== "stable") {
+            console.log("[v0] Ignoring offer, not in stable state:", pc.signalingState)
             return
           }
 
           await pc.setRemoteDescription(new RTCSessionDescription(signal.payload as RTCSessionDescriptionInit))
+          console.log("[v0] Set remote description (offer)")
 
           for (const candidate of pendingCandidatesRef.current) {
             await pc.addIceCandidate(new RTCIceCandidate(candidate))
@@ -193,6 +208,7 @@ export function VideoRoom({
 
           const answer = await pc.createAnswer()
           await pc.setLocalDescription(answer)
+          console.log("[v0] Created and set answer")
 
           await signaling.sendSignal(roomId, fromId, {
             type: "answer",
@@ -200,10 +216,12 @@ export function VideoRoom({
           })
         } else if (signal.type === "answer") {
           if (pc.signalingState !== "have-local-offer") {
+            console.log("[v0] Ignoring answer, not in have-local-offer state:", pc.signalingState)
             return
           }
 
           await pc.setRemoteDescription(new RTCSessionDescription(signal.payload as RTCSessionDescriptionInit))
+          console.log("[v0] Set remote description (answer)")
 
           for (const candidate of pendingCandidatesRef.current) {
             await pc.addIceCandidate(new RTCIceCandidate(candidate))
@@ -213,12 +231,14 @@ export function VideoRoom({
           const candidate = signal.payload as RTCIceCandidateInit
           if (pc.remoteDescription && pc.remoteDescription.type) {
             await pc.addIceCandidate(new RTCIceCandidate(candidate))
+            console.log("[v0] Added ICE candidate")
           } else {
+            console.log("[v0] Buffering ICE candidate")
             pendingCandidatesRef.current.push(candidate)
           }
         }
       } catch (error) {
-        console.error("Error handling signal:", error)
+        console.error("[v0] Error handling signal:", error)
       }
     }
 
@@ -238,21 +258,27 @@ export function VideoRoom({
 
     const initConnection = async () => {
       setConnectionState("connecting")
+      console.log("[v0] Initializing connection, isInitiator:", isInitiator)
 
       try {
         let stream: MediaStream | null = null
 
         if (type === "video" && !permissionsDenied) {
-          console.log("Requesting local stream...")
+          console.log("[v0] Requesting local stream...")
           stream = await getLocalStream()
           if (stream) {
-            console.log("Local stream acquired, tracks:", stream.getTracks().length)
+            console.log(
+              "[v0] Local stream acquired, tracks:",
+              stream.getTracks().map((t) => `${t.kind}:${t.enabled}`),
+            )
             setLocalStream(stream)
             if (localVideoRef.current) {
               localVideoRef.current.srcObject = stream
+              localVideoRef.current.muted = true
+              localVideoRef.current.play().catch((e) => console.error("[v0] Local video play error:", e))
             }
           } else {
-            console.error("Failed to acquire local stream")
+            console.error("[v0] Failed to acquire local stream")
           }
         }
 
@@ -260,10 +286,12 @@ export function VideoRoom({
 
         const pc = new RTCPeerConnection(rtcConfig)
         peerConnectionRef.current = pc
+        console.log("[v0] Created RTCPeerConnection")
 
         // Handle ICE candidates
         pc.onicecandidate = async (event) => {
           if (event.candidate) {
+            console.log("[v0] Sending ICE candidate")
             await signaling.sendSignal(roomId, peerId, {
               type: "ice-candidate",
               payload: event.candidate.toJSON(),
@@ -272,32 +300,55 @@ export function VideoRoom({
         }
 
         pc.ontrack = (event) => {
-          console.log("Received remote track:", event.track.kind)
-          // Create or get existing remote stream
+          console.log("[v0] Received remote track:", event.track.kind, "readyState:", event.track.readyState)
+
+          // Create remote stream if it doesn't exist
           if (!remoteStreamRef.current) {
             remoteStreamRef.current = new MediaStream()
+            console.log("[v0] Created new remote MediaStream")
           }
 
-          // Add the track to our stream
+          // Add the track
           const existingTrack = remoteStreamRef.current.getTracks().find((t) => t.id === event.track.id)
           if (!existingTrack) {
             remoteStreamRef.current.addTrack(event.track)
+            console.log("[v0] Added track to remote stream, total tracks:", remoteStreamRef.current.getTracks().length)
           }
 
-          // Update state with a NEW MediaStream instance to ensure React detects the change
-          setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()))
-
+          // Attach to video element immediately
           if (remoteVideoRef.current) {
             if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
               remoteVideoRef.current.srcObject = remoteStreamRef.current
+              console.log("[v0] Attached remote stream to video element")
             }
-            remoteVideoRef.current.play().catch((err) => console.error("Error playing remote video:", err))
+            // Try to play
+            remoteVideoRef.current.play().catch((err) => {
+              console.error("[v0] Remote video play error:", err)
+              // User interaction might be needed for autoplay
+            })
+          }
+
+          // Update React state
+          setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()))
+
+          // Track ended handler
+          event.track.onended = () => {
+            console.log("[v0] Remote track ended:", event.track.kind)
+          }
+
+          event.track.onmute = () => {
+            console.log("[v0] Remote track muted:", event.track.kind)
+          }
+
+          event.track.onunmute = () => {
+            console.log("[v0] Remote track unmuted:", event.track.kind)
           }
         }
 
         // Add local tracks if we have them
         if (stream) {
           stream.getTracks().forEach((track) => {
+            console.log("[v0] Adding local track to peer connection:", track.kind)
             pc.addTrack(track, stream!)
           })
         }
@@ -305,6 +356,7 @@ export function VideoRoom({
         // Set up data channel
         const setupDataChannel = (channel: RTCDataChannel) => {
           channel.onopen = () => {
+            console.log("[v0] Data channel opened")
             setConnectionState("connected")
             setMessages([
               {
@@ -319,16 +371,22 @@ export function VideoRoom({
           channel.onmessage = (event) => {
             handleIncomingMessage(event.data)
           }
-          channel.onclose = () => {}
-          channel.onerror = () => {}
+          channel.onclose = () => {
+            console.log("[v0] Data channel closed")
+          }
+          channel.onerror = (err) => {
+            console.error("[v0] Data channel error:", err)
+          }
         }
 
         if (isInitiator) {
+          console.log("[v0] Creating data channel (initiator)")
           const dc = pc.createDataChannel("chat", { ordered: true })
           setupDataChannel(dc)
           dataChannelRef.current = dc
         } else {
           pc.ondatachannel = (event) => {
+            console.log("[v0] Received data channel")
             setupDataChannel(event.channel)
             dataChannelRef.current = event.channel
           }
@@ -336,6 +394,7 @@ export function VideoRoom({
 
         pc.onconnectionstatechange = () => {
           const state = pc.connectionState
+          console.log("[v0] Connection state changed:", state)
 
           if (state === "connected") {
             setConnectionState("connected")
@@ -343,7 +402,6 @@ export function VideoRoom({
             setDisconnectReason("")
           } else if (state === "disconnected") {
             setConnectionState("disconnected")
-            // Give it a moment to reconnect before scaring the user
             setTimeout(() => {
               if (pc.connectionState === "disconnected") {
                 setDisconnectReason("Connection unstable...")
@@ -358,23 +416,30 @@ export function VideoRoom({
         }
 
         pc.oniceconnectionstatechange = () => {
+          console.log("[v0] ICE connection state:", pc.iceConnectionState)
           if (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed") {
             setConnectionState("connected")
           }
         }
 
+        // Initiator creates and sends offer
         if (isInitiator) {
-          await new Promise((resolve) => setTimeout(resolve, 300))
+          // Small delay to ensure non-initiator has set up signal handler
+          await new Promise((resolve) => setTimeout(resolve, 500))
+
+          console.log("[v0] Creating offer (initiator)")
           const offer = await pc.createOffer()
           await pc.setLocalDescription(offer)
+          console.log("[v0] Set local description (offer)")
 
           await signaling.sendSignal(roomId, peerId, {
             type: "offer",
             payload: offer,
           })
+          console.log("[v0] Sent offer to peer")
         }
       } catch (error) {
-        console.error("Failed to initialize:", error)
+        console.error("[v0] Failed to initialize:", error)
         setConnectionState("failed")
       }
     }
@@ -434,20 +499,19 @@ export function VideoRoom({
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
-      console.log("Attaching local stream to video element")
       localVideoRef.current.srcObject = localStream
-      localVideoRef.current.muted = true // Ensure local video is always muted
-      localVideoRef.current.play().catch((err) => console.error("Error playing local video:", err))
+      localVideoRef.current.muted = true
+      localVideoRef.current.play().catch(() => {})
     }
   }, [localStream])
 
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
-      console.log("Attaching REMOTE stream to video element")
       remoteVideoRef.current.srcObject = remoteStream
-      remoteVideoRef.current.play().catch((err) => console.error("Error playing remote video:", err))
+      remoteVideoRef.current.muted = isRemoteAudioMuted
+      remoteVideoRef.current.play().catch(() => {})
     }
-  }, [remoteStream])
+  }, [remoteStream, isRemoteAudioMuted])
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -734,13 +798,13 @@ export function VideoRoom({
             ref={remoteVideoRef}
             autoPlay
             playsInline
-            muted={false}
+            muted={isRemoteAudioMuted}
             className="h-full w-full object-cover"
-            poster="/developer-video-call-dark-background.jpg"
           />
 
-          {connectionState !== "connected" && !remoteStream && (
-            <div className="absolute inset-0 flex items-center justify-center bg-secondary/80">
+          {/* Show placeholder when no remote stream */}
+          {!remoteStream && (
+            <div className="absolute inset-0 flex items-center justify-center bg-secondary">
               <div className="text-center">
                 <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
                 <p className="text-sm text-muted-foreground">Waiting for peer video...</p>
@@ -788,28 +852,14 @@ export function VideoRoom({
           {type === "video" && (
             <div className="absolute bottom-24 right-6 h-32 w-48 overflow-hidden rounded-xl border border-border bg-secondary shadow-lg">
               {localStream ? (
-                <div className="relative h-full w-full">
-                  <video
-                    ref={localVideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="h-full w-full object-cover"
-                    onLoadedMetadata={() => {
-                      console.log("Local video metadata loaded")
-                      localVideoRef.current?.play().catch(e => console.error("Local play fail", e))
-                    }}
-                  />
-                  <div className="absolute top-0 left-0 bg-black/50 text-[10px] text-white p-1 pointer-events-none">
-                    L: {localStream.id.slice(0, 4)}<br/>
-                    A: {localStream.active ? "T" : "F"}<br/>
-                    T: {localStream.getTracks().length}<br/>
-                    V: {localStream.getVideoTracks().length}<br/>
-                    E: {localStream.getVideoTracks()[0]?.enabled ? "T" : "F"}<br/>
-                    M: {localStream.getVideoTracks()[0]?.muted ? "T" : "F"}<br/>
-                    S: {localStream.getVideoTracks()[0]?.readyState}
-                  </div>
-                </div>
+                <video
+                  ref={localVideoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className="h-full w-full object-cover"
+                  style={{ transform: "scaleX(-1)" }}
+                />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-secondary">
                   <VideoOff className="h-8 w-8 text-muted-foreground" />
@@ -939,7 +989,7 @@ export function VideoRoom({
         onAutoDisconnect={handleReportAutoDisconnect}
       />
 
-      {/* Controls bar */}
+      {/* Controls bar - Added remote audio mute button */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
@@ -951,6 +1001,7 @@ export function VideoRoom({
           size="lg"
           onClick={toggleAudio}
           className="h-12 w-12 rounded-full p-0"
+          title={isAudioEnabled ? "Mute microphone" : "Unmute microphone"}
         >
           {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
         </Button>
@@ -960,8 +1011,20 @@ export function VideoRoom({
           size="lg"
           onClick={toggleVideo}
           className="h-12 w-12 rounded-full p-0"
+          title={isVideoEnabled ? "Turn off camera" : "Turn on camera"}
         >
           {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+        </Button>
+
+        {/* Remote audio control */}
+        <Button
+          variant={isRemoteAudioMuted ? "destructive" : "secondary"}
+          size="lg"
+          onClick={toggleRemoteAudio}
+          className="h-12 w-12 rounded-full p-0"
+          title={isRemoteAudioMuted ? "Unmute peer audio" : "Mute peer audio"}
+        >
+          {isRemoteAudioMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
         </Button>
 
         <Button variant="secondary" size="lg" onClick={handleSkip} className="h-12 gap-2 rounded-full px-6">
