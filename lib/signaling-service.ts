@@ -198,6 +198,9 @@ class SignalingService {
         reconnectionDelayMax: 5000,
         timeout: 20000,
         forceNew: true, // Force new connection to avoid stale connections
+        extraHeaders: {
+          "ngrok-skip-browser-warning": "true",
+        },
       })
 
       const connectionTimeout = setTimeout(() => {
@@ -255,7 +258,13 @@ class SignalingService {
 
       // Handle WebRTC signaling events
       this.socket.on("signal", (data: { signal: WebRTCSignal; fromId: string }) => {
-        this.onSignalCallback?.(data.signal, data.fromId)
+        if (this.onSignalCallback) {
+          this.onSignalCallback(data.signal, data.fromId)
+        } else {
+          // Buffer signal if handler not ready
+          console.log("Buffering signal", data.signal.type)
+          this.signalBuffer.push(data)
+        }
       })
 
       // Handle stats updates
@@ -309,12 +318,24 @@ class SignalingService {
     }
   }
 
+  // Signal buffer for race conditions
+  private signalBuffer: { signal: WebRTCSignal; fromId: string }[] = []
+
   onMatch(callback: (result: MatchResult) => void) {
     this.onMatchCallback = callback
   }
 
   onSignal(callback: (signal: WebRTCSignal, fromId: string) => void) {
     this.onSignalCallback = callback
+    
+    // Process buffered signals
+    if (this.signalBuffer.length > 0) {
+      console.log(`Processing ${this.signalBuffer.length} buffered signals`)
+      this.signalBuffer.forEach(item => {
+        callback(item.signal, item.fromId)
+      })
+      this.signalBuffer = []
+    }
   }
 
   onStats(callback: (stats: PlatformStats) => void) {
@@ -322,6 +343,7 @@ class SignalingService {
   }
 
   async leaveQueue(): Promise<void> {
+    this.signalBuffer = [] // Clear buffer
     if (!this.socket?.connected) return
 
     return new Promise((resolve) => {
@@ -337,6 +359,7 @@ class SignalingService {
   }
 
   async skip(roomId: string, mode: AppMode, type: ConnectionType): Promise<MatchResult> {
+    this.signalBuffer = [] // Clear buffer
     if (!this.socket?.connected) {
       return { success: false, type: "error", message: "Socket not connected" }
     }
@@ -406,6 +429,7 @@ class SignalingService {
     this.currentMode = null
     this.currentType = null
     this.isConnected = false
+    this.signalBuffer = []
   }
 }
 

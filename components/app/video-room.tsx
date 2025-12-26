@@ -17,7 +17,6 @@ import {
   Share2,
   User,
   AlertTriangle,
-  SwitchCamera,
 } from "lucide-react"
 import { Textarea } from "@/components/ui/textarea"
 import type { AppMode, ConnectionType, MediaPermissions } from "@/app/app/page"
@@ -75,7 +74,6 @@ export function VideoRoom({
   const [showPeerProfile, setShowPeerProfile] = useState(false)
   const [showDisconnectWarning, setShowDisconnectWarning] = useState(false)
   const [disconnectReason, setDisconnectReason] = useState("")
-  const [isFrontCamera, setIsFrontCamera] = useState(true)
   const [permissionsDenied, setPermissionsDenied] = useState(initialPermissions?.denied ?? false)
 
   const localVideoRef = useRef<HTMLVideoElement>(null)
@@ -90,11 +88,11 @@ export function VideoRoom({
   const isCleaningUpRef = useRef(false)
   const remoteStreamRef = useRef<MediaStream | null>(null)
 
-  const getLocalStream = useCallback(async (useFrontCamera = true): Promise<MediaStream | null> => {
+  const getLocalStream = useCallback(async (): Promise<MediaStream | null> => {
     try {
       const constraints: MediaStreamConstraints = {
         video: {
-          facingMode: useFrontCamera ? "user" : "environment",
+          facingMode: "user",
           width: { ideal: 1280 },
           height: { ideal: 720 },
         },
@@ -124,7 +122,7 @@ export function VideoRoom({
         setIsVideoEnabled(!isVideoEnabled)
       }
     } else if (type === "video" && permissionsDenied) {
-      const stream = await getLocalStream(isFrontCamera)
+      const stream = await getLocalStream()
       if (stream) {
         setLocalStream(stream)
         setIsVideoEnabled(true)
@@ -140,7 +138,7 @@ export function VideoRoom({
         }
       }
     }
-  }, [localStream, isVideoEnabled, type, permissionsDenied, getLocalStream, isFrontCamera])
+  }, [localStream, isVideoEnabled, type, permissionsDenied, getLocalStream])
 
   const toggleAudio = useCallback(async () => {
     if (localStream) {
@@ -152,7 +150,7 @@ export function VideoRoom({
         setIsAudioEnabled(!isAudioEnabled)
       }
     } else if (type === "video" && permissionsDenied) {
-      const stream = await getLocalStream(isFrontCamera)
+      const stream = await getLocalStream()
       if (stream) {
         setLocalStream(stream)
         setIsVideoEnabled(true)
@@ -168,35 +166,7 @@ export function VideoRoom({
         }
       }
     }
-  }, [localStream, isAudioEnabled, type, permissionsDenied, getLocalStream, isFrontCamera])
-
-  const flipCamera = useCallback(async () => {
-    if (!localStream) return
-
-    const newFacingMode = !isFrontCamera
-    setIsFrontCamera(newFacingMode)
-
-    localStream.getTracks().forEach((track) => track.stop())
-
-    const newStream = await getLocalStream(newFacingMode)
-    if (newStream) {
-      setLocalStream(newStream)
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = newStream
-      }
-
-      const pc = peerConnectionRef.current
-      if (pc) {
-        const senders = pc.getSenders()
-        for (const track of newStream.getTracks()) {
-          const sender = senders.find((s) => s.track?.kind === track.kind)
-          if (sender) {
-            await sender.replaceTrack(track)
-          }
-        }
-      }
-    }
-  }, [localStream, isFrontCamera, getLocalStream])
+  }, [localStream, isAudioEnabled, type, permissionsDenied, getLocalStream])
 
   // Set up signal handler
   useEffect(() => {
@@ -273,12 +243,16 @@ export function VideoRoom({
         let stream: MediaStream | null = null
 
         if (type === "video" && !permissionsDenied) {
-          stream = await getLocalStream(isFrontCamera)
+          console.log("Requesting local stream...")
+          stream = await getLocalStream()
           if (stream) {
+            console.log("Local stream acquired, tracks:", stream.getTracks().length)
             setLocalStream(stream)
             if (localVideoRef.current) {
               localVideoRef.current.srcObject = stream
             }
+          } else {
+            console.error("Failed to acquire local stream")
           }
         }
 
@@ -298,6 +272,7 @@ export function VideoRoom({
         }
 
         pc.ontrack = (event) => {
+          console.log("Received remote track:", event.track.kind)
           // Create or get existing remote stream
           if (!remoteStreamRef.current) {
             remoteStreamRef.current = new MediaStream()
@@ -309,14 +284,14 @@ export function VideoRoom({
             remoteStreamRef.current.addTrack(event.track)
           }
 
-          // Update state and attach to video element
-          setRemoteStream(remoteStreamRef.current)
+          // Update state with a NEW MediaStream instance to ensure React detects the change
+          setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()))
 
           if (remoteVideoRef.current) {
             if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
               remoteVideoRef.current.srcObject = remoteStreamRef.current
             }
-            remoteVideoRef.current.play().catch(() => {})
+            remoteVideoRef.current.play().catch((err) => console.error("Error playing remote video:", err))
           }
         }
 
@@ -365,10 +340,16 @@ export function VideoRoom({
           if (state === "connected") {
             setConnectionState("connected")
             setShowDisconnectWarning(false)
+            setDisconnectReason("")
           } else if (state === "disconnected") {
             setConnectionState("disconnected")
-            setDisconnectReason("Your peer seems to have connection issues.")
-            setShowDisconnectWarning(true)
+            // Give it a moment to reconnect before scaring the user
+            setTimeout(() => {
+              if (pc.connectionState === "disconnected") {
+                setDisconnectReason("Connection unstable...")
+                setShowDisconnectWarning(true)
+              }
+            }, 5000)
           } else if (state === "failed") {
             setConnectionState("failed")
             setDisconnectReason("The connection has failed.")
@@ -403,7 +384,7 @@ export function VideoRoom({
     return () => {
       isCleaningUpRef.current = true
     }
-  }, [roomId, peerId, isInitiator, mode, type, permissionsDenied, getLocalStream, isFrontCamera])
+  }, [roomId, peerId, isInitiator, mode, type, permissionsDenied, getLocalStream])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -453,19 +434,18 @@ export function VideoRoom({
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
-      if (localVideoRef.current.srcObject !== localStream) {
-        localVideoRef.current.srcObject = localStream
-        localVideoRef.current.play().catch(() => {})
-      }
+      console.log("Attaching local stream to video element")
+      localVideoRef.current.srcObject = localStream
+      localVideoRef.current.muted = true // Ensure local video is always muted
+      localVideoRef.current.play().catch((err) => console.error("Error playing local video:", err))
     }
   }, [localStream])
 
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
-      if (remoteVideoRef.current.srcObject !== remoteStream) {
-        remoteVideoRef.current.srcObject = remoteStream
-        remoteVideoRef.current.play().catch(() => {})
-      }
+      console.log("Attaching REMOTE stream to video element")
+      remoteVideoRef.current.srcObject = remoteStream
+      remoteVideoRef.current.play().catch((err) => console.error("Error playing remote video:", err))
     }
   }, [remoteStream])
 
@@ -814,22 +794,11 @@ export function VideoRoom({
                   playsInline
                   muted
                   className="h-full w-full object-cover"
-                  style={{ transform: isFrontCamera ? "scaleX(-1)" : "none" }}
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-secondary">
                   <VideoOff className="h-8 w-8 text-muted-foreground" />
                 </div>
-              )}
-              {localStream && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={flipCamera}
-                  className="absolute bottom-2 right-2 h-8 w-8 rounded-full bg-background/80 backdrop-blur-lg hover:bg-background"
-                >
-                  <SwitchCamera className="h-4 w-4" />
-                </Button>
               )}
             </div>
           )}

@@ -422,6 +422,13 @@ async function handleNext(
 async function handleLeave(socket: Socket, sessionId: string, data: { roomId?: string }): Promise<void> {
   const sessionData = await redisClient.hGetAll(getSessionKey(sessionId))
 
+  // If this socket is not the current one for the session, ignore
+  // This prevents stale connections (e.g. from previous tab) from destroying the match
+  if (sessionData.socketId && sessionData.socketId !== socket.id) {
+    console.log(`Ignoring leave for session ${sessionId} from stale socket ${socket.id}`)
+    return
+  }
+
   if (sessionData.matchId) {
     // Notify peer
     const participants = await destroyMatch(sessionData.matchId)
@@ -632,6 +639,8 @@ async function main() {
     // Store socket mapping
     if (redisClient) {
       await redisClient.set(getSocketKey(socket.id), sessionId, { EX: 3600 })
+      // Update session with new socket ID immediately to handle reconnections
+      await redisClient.hSet(getSessionKey(sessionId), { socketId: socket.id })
     }
 
     // Event handlers
@@ -682,8 +691,8 @@ async function main() {
       })
     })
 
-    socket.on("disconnect", async () => {
-      console.log(`Client disconnected: ${sessionId}`)
+    socket.on("disconnect", async (reason) => {
+      console.log(`Client disconnected: ${sessionId}, reason: ${reason}`)
       try {
         await handleDisconnect(socket)
       } catch (error) {
