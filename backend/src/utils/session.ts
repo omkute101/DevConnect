@@ -58,24 +58,36 @@ export async function createSession(): Promise<Session> {
     reportCount: 0,
   };
 
-  await redis.set(`session:${sessionId}`, JSON.stringify(session), "EX", SESSION_TTL);
+  // Use hSet to store as hash (consistent with index.ts)
+  await redis.hset(`session:${sessionId}`, {
+    sessionId,
+    socketId: "",
+    selectedMode: "",
+    createdAt: now.toString(),
+    lastSeen: now.toString(),
+    reportCount: "0",
+    inQueue: "false",
+  });
+  await redis.expire(`session:${sessionId}`, SESSION_TTL);
   return session;
 }
 
 export async function getSession(sessionId: string): Promise<Session | null> {
-  const data = await redis.get(`session:${sessionId}`);
-  if (!data) return null;
-  return JSON.parse(data) as Session;
+  const data = await redis.hgetall(`session:${sessionId}`);
+  if (!data || Object.keys(data).length === 0) return null;
+  return {
+    sessionId: data.sessionId,
+    socketId: data.socketId || null,
+    selectedMode: data.selectedMode || null,
+    createdAt: parseInt(data.createdAt) || 0,
+    lastSeen: parseInt(data.lastSeen) || 0,
+    reportCount: parseInt(data.reportCount) || 0,
+  } as Session;
 }
 
 export async function incrementReportCount(sessionId: string): Promise<number> {
-  const session = await getSession(sessionId);
-  if (!session) return 0;
-
-  session.reportCount = (session.reportCount || 0) + 1;
-  await redis.set(`session:${sessionId}`, JSON.stringify(session), "EX", SESSION_TTL);
-  
-  return session.reportCount;
+  const newCount = await redis.hincrby(`session:${sessionId}`, "reportCount", 1);
+  return newCount;
 }
 
 export async function getActiveSessionCount(): Promise<number> {

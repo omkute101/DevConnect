@@ -177,16 +177,18 @@ async function createSession(): Promise<{ sessionId: string }> {
   const sessionId = generateSessionId()
   const now = Date.now()
 
-  const session = {
+  // Use hSet to store session data as a hash (consistent with other session operations)
+  await redisClient.hSet(getSessionKey(sessionId), {
     sessionId,
-    socketId: null,
-    selectedMode: null,
-    createdAt: now,
-    lastSeen: now,
-    reportCount: 0,
-  }
+    socketId: "",
+    selectedMode: "",
+    createdAt: now.toString(),
+    lastSeen: now.toString(),
+    reportCount: "0",
+    inQueue: "false",
+  })
+  await redisClient.expire(getSessionKey(sessionId), SESSION_TTL)
 
-  await redisClient.set(`session:${sessionId}`, JSON.stringify(session), { EX: SESSION_TTL })
   return { sessionId }
 }
 
@@ -221,24 +223,48 @@ async function findMatch(sessionId: string, mode: string, connectionType: string
   const queueKey = getQueueKey(targetMode, connectionType)
 
   // Try to get first person in queue (not ourselves)
-  const queueLength = await redisClient.lLen(queueKey)
+  // Fix: Use dynamic length check and proper index handling when removing items
+  let i = 0
+  let queueLength = await redisClient.lLen(queueKey)
+  const MAX_CHECKS = 50 // Safety limit
 
-  for (let i = 0; i < queueLength; i++) {
+  while (i < queueLength && i < MAX_CHECKS) {
     const peerId = await redisClient.lIndex(queueKey, i)
 
-    if (!peerId || peerId === sessionId) continue
+    if (!peerId) {
+        break
+    }
+
+    if (peerId === sessionId) {
+        i++
+        continue
+    }
 
     // Check if peer is still valid
     const peerData = await redisClient.hGetAll(getSessionKey(peerId))
+    console.log(`[match] Checking ${peerId}: socket=${!!peerData.socketId}, inQueue=${peerData.inQueue}`)
+
     if (!peerData.socketId || peerData.inQueue !== "true") {
       // Remove stale entry
+      console.log(`[match] Removing stale entry ${peerId}`)
       await redisClient.lRem(queueKey, 1, peerId)
+      // Do NOT increment i, as the next item shifted into this slot
+      // Update length
+      queueLength = await redisClient.lLen(queueKey)
       continue
     }
 
     // Found a match! Remove from queue atomically
     const removed = await redisClient.lRem(queueKey, 1, peerId)
-    if (removed === 0) continue // Someone else got them
+    if (removed === 0) {
+        console.log(`[match] Failed to atomically remove ${peerId}`)
+        // If we failed to remove, it might have been removed by someone else
+        // We updates length and check index i again (which now has a new item)
+        queueLength = await redisClient.lLen(queueKey)
+        continue
+    }
+
+    console.log(`[match] Successfully matched ${sessionId} with ${peerId}`)
 
     // Create match
     const matchId = `match_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
@@ -276,6 +302,7 @@ async function findMatch(sessionId: string, mode: string, connectionType: string
     return match
   }
 
+  console.log(`[match] No match found for ${sessionId} in ${queueKey} (checked ${i} items)`)
   return null
 }
 
@@ -365,14 +392,46 @@ async function handleNext(
     if (peerData.socketId) {
       io.to(peerData.socketId).emit("peer-skipped")
 
-      // Re-add peer to queue
-      await addToQueue({
-        sessionId: peerId,
-        socketId: peerData.socketId,
-        mode: peerData.mode || mode,
-        connectionType: peerData.connectionType || connectionType,
-        timestamp: Date.now(),
-      })
+      // Try to find new match immediately for the skipped peer
+      const peerMode = peerData.mode || mode
+      const peerType = peerData.connectionType || connectionType
+
+      const match = await findMatch(peerId, peerMode, peerType)
+
+      if (match) {
+        const newPeerId = match.participants.find((p) => p !== peerId)!
+        const newPeerData = await redisClient.hGetAll(getSessionKey(newPeerId))
+
+        // Notify skipped peer
+        io.to(peerData.socketId).emit("matched", {
+          roomId: match.matchId,
+          peerId: newPeerId,
+          isInitiator: true, 
+        })
+        const peerSocket = io.sockets.sockets.get(peerData.socketId)
+        peerSocket?.join(match.matchId)
+
+        // Notify new peer
+        io.to(newPeerData.socketId).emit("matched", {
+          roomId: match.matchId,
+          peerId: peerId,
+          isInitiator: false,
+        })
+        const newPeerSocket = io.sockets.sockets.get(newPeerData.socketId)
+        newPeerSocket?.join(match.matchId)
+
+        totalConnections++
+        todayConnections++
+      } else {
+        // Re-add peer to queue
+        await addToQueue({
+          sessionId: peerId,
+          socketId: peerData.socketId,
+          mode: peerData.mode || mode,
+          connectionType: peerData.connectionType || connectionType,
+          timestamp: Date.now(),
+        })
+      }
     }
   }
 
@@ -439,14 +498,46 @@ async function handleLeave(socket: Socket, sessionId: string, data: { roomId?: s
       if (peerData.socketId) {
         io.to(peerData.socketId).emit("peer-left")
 
-        // Re-add peer to queue automatically
-        await addToQueue({
-          sessionId: peerId,
-          socketId: peerData.socketId,
-          mode: peerData.mode || sessionData.mode,
-          connectionType: peerData.connectionType || sessionData.connectionType,
-          timestamp: Date.now(),
-        })
+        // Try to find new match immediately for the abandoned peer
+        const peerMode = peerData.mode || sessionData.mode
+        const peerType = peerData.connectionType || sessionData.connectionType
+
+        const match = await findMatch(peerId, peerMode, peerType)
+
+        if (match) {
+          const newPeerId = match.participants.find((p) => p !== peerId)!
+          const newPeerData = await redisClient.hGetAll(getSessionKey(newPeerId))
+
+          // Notify abandoned peer
+          io.to(peerData.socketId).emit("matched", {
+            roomId: match.matchId,
+            peerId: newPeerId,
+            isInitiator: true,
+          })
+          const peerSocket = io.sockets.sockets.get(peerData.socketId)
+          peerSocket?.join(match.matchId)
+
+          // Notify new peer
+          io.to(newPeerData.socketId).emit("matched", {
+            roomId: match.matchId,
+            peerId: peerId,
+            isInitiator: false,
+          })
+          const newPeerSocket = io.sockets.sockets.get(newPeerData.socketId)
+          newPeerSocket?.join(match.matchId)
+
+          totalConnections++
+          todayConnections++
+        } else {
+          // Re-add peer to queue automatically if no match found
+          await addToQueue({
+            sessionId: peerId,
+            socketId: peerData.socketId,
+            mode: peerMode,
+            connectionType: peerType,
+            timestamp: Date.now(),
+          })
+        }
       }
     }
 
