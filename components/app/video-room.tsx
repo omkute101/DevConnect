@@ -64,7 +64,7 @@ export function VideoRoom({
 }: VideoRoomProps) {
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle")
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
-  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
+  const [remoteStreamReady, setRemoteStreamReady] = useState(0)
   const [isVideoEnabled, setIsVideoEnabled] = useState(type === "video" && !initialPermissions?.denied)
   const [isAudioEnabled, setIsAudioEnabled] = useState(type === "video" && !initialPermissions?.denied)
   const [isChatOpen, setIsChatOpen] = useState(type === "chat")
@@ -90,6 +90,9 @@ export function VideoRoom({
   const isInitializedRef = useRef(false)
   const isCleaningUpRef = useRef(false)
   const remoteStreamRef = useRef<MediaStream | null>(null)
+  const localStreamRef = useRef<MediaStream | null>(null)
+
+  const hasRemoteStream = remoteStreamReady > 0 && remoteStreamRef.current !== null
 
   const getLocalStream = useCallback(async (): Promise<MediaStream | null> => {
     try {
@@ -116,8 +119,8 @@ export function VideoRoom({
   }, [])
 
   const toggleVideo = useCallback(async () => {
-    if (localStream) {
-      const videoTracks = localStream.getVideoTracks()
+    if (localStreamRef.current) {
+      const videoTracks = localStreamRef.current.getVideoTracks()
       if (videoTracks.length > 0) {
         videoTracks.forEach((track) => {
           track.enabled = !isVideoEnabled
@@ -127,6 +130,7 @@ export function VideoRoom({
     } else if (type === "video" && permissionsDenied) {
       const stream = await getLocalStream()
       if (stream) {
+        localStreamRef.current = stream
         setLocalStream(stream)
         setIsVideoEnabled(true)
         setIsAudioEnabled(true)
@@ -141,11 +145,11 @@ export function VideoRoom({
         }
       }
     }
-  }, [localStream, isVideoEnabled, type, permissionsDenied, getLocalStream])
+  }, [isVideoEnabled, type, permissionsDenied, getLocalStream])
 
   const toggleAudio = useCallback(async () => {
-    if (localStream) {
-      const audioTracks = localStream.getAudioTracks()
+    if (localStreamRef.current) {
+      const audioTracks = localStreamRef.current.getAudioTracks()
       if (audioTracks.length > 0) {
         audioTracks.forEach((track) => {
           track.enabled = !isAudioEnabled
@@ -155,6 +159,7 @@ export function VideoRoom({
     } else if (type === "video" && permissionsDenied) {
       const stream = await getLocalStream()
       if (stream) {
+        localStreamRef.current = stream
         setLocalStream(stream)
         setIsVideoEnabled(true)
         setIsAudioEnabled(true)
@@ -169,7 +174,7 @@ export function VideoRoom({
         }
       }
     }
-  }, [localStream, isAudioEnabled, type, permissionsDenied, getLocalStream])
+  }, [isAudioEnabled, type, permissionsDenied, getLocalStream])
 
   const toggleRemoteAudio = useCallback(() => {
     if (remoteVideoRef.current) {
@@ -249,6 +254,28 @@ export function VideoRoom({
     }
   }, [roomId])
 
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStreamRef.current) {
+      console.log("[v0] Attaching remote stream to video element, tracks:", remoteStreamRef.current.getTracks().length)
+      remoteVideoRef.current.srcObject = remoteStreamRef.current
+      remoteVideoRef.current.muted = isRemoteAudioMuted
+      remoteVideoRef.current.play().catch((e) => {
+        console.log("[v0] Remote video play failed (user interaction may be needed):", e.message)
+      })
+    }
+  }, [remoteStreamReady, isRemoteAudioMuted])
+
+  useEffect(() => {
+    if (localVideoRef.current && localStreamRef.current) {
+      console.log("[v0] Attaching local stream to video element")
+      localVideoRef.current.srcObject = localStreamRef.current
+      localVideoRef.current.muted = true
+      localVideoRef.current.play().catch((e) => {
+        console.log("[v0] Local video play failed:", e.message)
+      })
+    }
+  }, [localStream])
+
   // Initialize connection
   useEffect(() => {
     if (isInitializedRef.current || isCleaningUpRef.current) return
@@ -271,12 +298,8 @@ export function VideoRoom({
               "[v0] Local stream acquired, tracks:",
               stream.getTracks().map((t) => `${t.kind}:${t.enabled}`),
             )
+            localStreamRef.current = stream
             setLocalStream(stream)
-            if (localVideoRef.current) {
-              localVideoRef.current.srcObject = stream
-              localVideoRef.current.muted = true
-              localVideoRef.current.play().catch((e) => console.error("[v0] Local video play error:", e))
-            }
           } else {
             console.error("[v0] Failed to acquire local stream")
           }
@@ -308,30 +331,16 @@ export function VideoRoom({
             console.log("[v0] Created new remote MediaStream")
           }
 
-          // Add the track
+          // Check if track already exists
           const existingTrack = remoteStreamRef.current.getTracks().find((t) => t.id === event.track.id)
           if (!existingTrack) {
             remoteStreamRef.current.addTrack(event.track)
             console.log("[v0] Added track to remote stream, total tracks:", remoteStreamRef.current.getTracks().length)
           }
 
-          // Attach to video element immediately
-          if (remoteVideoRef.current) {
-            if (remoteVideoRef.current.srcObject !== remoteStreamRef.current) {
-              remoteVideoRef.current.srcObject = remoteStreamRef.current
-              console.log("[v0] Attached remote stream to video element")
-            }
-            // Try to play
-            remoteVideoRef.current.play().catch((err) => {
-              console.error("[v0] Remote video play error:", err)
-              // User interaction might be needed for autoplay
-            })
-          }
+          setRemoteStreamReady((prev) => prev + 1)
 
-          // Update React state
-          setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()))
-
-          // Track ended handler
+          // Track event handlers
           event.track.onended = () => {
             console.log("[v0] Remote track ended:", event.track.kind)
           }
@@ -457,11 +466,11 @@ export function VideoRoom({
       if (isCleaningUpRef.current) {
         dataChannelRef.current?.close()
         peerConnectionRef.current?.close()
-        localStream?.getTracks().forEach((track) => track.stop())
+        localStreamRef.current?.getTracks().forEach((track) => track.stop())
         remoteStreamRef.current = null
       }
     }
-  }, [localStream])
+  }, [])
 
   const handleIncomingMessage = (msg: string) => {
     try {
@@ -498,22 +507,6 @@ export function VideoRoom({
   }
 
   useEffect(() => {
-    if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream
-      localVideoRef.current.muted = true
-      localVideoRef.current.play().catch(() => {})
-    }
-  }, [localStream])
-
-  useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream
-      remoteVideoRef.current.muted = isRemoteAudioMuted
-      remoteVideoRef.current.play().catch(() => {})
-    }
-  }, [remoteStream, isRemoteAudioMuted])
-
-  useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
@@ -533,7 +526,7 @@ export function VideoRoom({
     dataChannelRef.current = null
     pendingCandidatesRef.current = []
     remoteStreamRef.current = null
-    setRemoteStream(null)
+    setRemoteStreamReady(0)
     setConnectionState("idle")
   }, [])
 
@@ -591,7 +584,8 @@ export function VideoRoom({
 
   const handleSkip = useCallback(() => {
     closeConnection()
-    localStream?.getTracks().forEach((track) => track.stop())
+    localStreamRef.current?.getTracks().forEach((track) => track.stop())
+    localStreamRef.current = null
     setLocalStream(null)
     setMessages([])
     setPeerProfile(null)
@@ -600,13 +594,14 @@ export function VideoRoom({
     isInitializedRef.current = false
     isCleaningUpRef.current = false
     onSkip()
-  }, [onSkip, closeConnection, localStream])
+  }, [onSkip, closeConnection])
 
   const handleLeave = useCallback(() => {
     closeConnection()
-    localStream?.getTracks().forEach((track) => track.stop())
+    localStreamRef.current?.getTracks().forEach((track) => track.stop())
+    localStreamRef.current = null
     onLeave()
-  }, [onLeave, closeConnection, localStream])
+  }, [onLeave, closeConnection])
 
   const handleReportAutoDisconnect = useCallback(() => {
     setDisconnectReason("This user has been reported multiple times and will be disconnected.")
@@ -799,11 +794,11 @@ export function VideoRoom({
             autoPlay
             playsInline
             muted={isRemoteAudioMuted}
-            className="h-full w-full object-cover"
+            className={`h-full w-full object-cover ${!hasRemoteStream ? "invisible" : ""}`}
           />
 
           {/* Show placeholder when no remote stream */}
-          {!remoteStream && (
+          {!hasRemoteStream && (
             <div className="absolute inset-0 flex items-center justify-center bg-secondary">
               <div className="text-center">
                 <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
@@ -909,78 +904,125 @@ export function VideoRoom({
                   handleSendMessage(e)
                 }
               }}
-              placeholder={connectionState === "connected" ? "Type a message..." : "Connecting..."}
-              className="flex-1 bg-secondary min-h-[40px] max-h-[120px] resize-none"
+              placeholder={connectionState === "connected" ? "Type a message..." : "Waiting for connection..."}
               disabled={connectionState !== "connected"}
+              className="min-h-[44px] max-h-[120px] resize-none"
             />
-            <Button
-              type="submit"
-              size="icon"
-              className="bg-foreground text-background hover:bg-foreground/90"
-              disabled={connectionState !== "connected"}
-              onMouseDown={(e) => e.preventDefault()}
-            >
+            <Button type="submit" size="icon" disabled={!message.trim() || connectionState !== "connected"}>
               <Send className="h-4 w-4" />
             </Button>
           </div>
         </form>
       </motion.div>
 
-      {/* Chat overlay - Mobile */}
+      {/* Mobile Chat Toggle */}
+      <div className="lg:hidden fixed bottom-20 right-4 z-50">
+        <Button size="icon" onClick={() => setIsChatOpen(!isChatOpen)} className="h-14 w-14 rounded-full shadow-lg">
+          {isChatOpen ? <X className="h-6 w-6" /> : <MessageSquare className="h-6 w-6" />}
+        </Button>
+      </div>
+
+      {/* Mobile Chat Panel */}
       <AnimatePresence>
         {isChatOpen && (
           <motion.div
-            initial={{ opacity: 0, y: "100%" }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: "100%" }}
-            className="absolute inset-0 z-50 flex flex-col bg-card lg:hidden"
+            initial={{ y: "100%" }}
+            animate={{ y: 0 }}
+            exit={{ y: "100%" }}
+            transition={{ type: "spring", damping: 25, stiffness: 300 }}
+            className="fixed inset-x-0 bottom-0 z-40 h-[60vh] rounded-t-3xl border-t border-border bg-card shadow-2xl lg:hidden"
           >
-            <div className="flex items-center justify-between border-b border-border p-4">
-              <h3 className="font-semibold">Chat</h3>
-              <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)}>
-                <X className="h-5 w-5" />
-              </Button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4">
-              <div className="space-y-4">
-                {messages.map(renderMessage)}
-                <div ref={chatEndRef} />
-              </div>
-            </div>
-
-            <form onSubmit={handleSendMessage} className="border-t border-border p-4">
-              <div className="flex gap-2">
-                <Textarea
-                  ref={textareaRef}
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault()
-                      handleSendMessage(e)
-                    }
-                  }}
-                  placeholder={connectionState === "connected" ? "Type a message..." : "Connecting..."}
-                  className="flex-1 bg-secondary min-h-[40px] max-h-[120px] resize-none"
-                  disabled={connectionState !== "connected"}
-                />
-                <Button
-                  type="submit"
-                  size="icon"
-                  className="bg-foreground text-background hover:bg-foreground/90"
-                  disabled={connectionState !== "connected"}
-                  onMouseDown={(e) => e.preventDefault()}
-                >
-                  <Send className="h-4 w-4" />
+            <div className="flex h-full flex-col">
+              <div className="flex items-center justify-between border-b border-border p-4">
+                <h3 className="font-semibold">Chat</h3>
+                <Button variant="ghost" size="icon" onClick={() => setIsChatOpen(false)}>
+                  <X className="h-4 w-4" />
                 </Button>
               </div>
-            </form>
+
+              <div className="flex-1 overflow-y-auto p-4">
+                <div className="space-y-4">
+                  {messages.length === 0 ? (
+                    <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+                      <p>{connectionState === "connected" ? "Say hello!" : "Connecting..."}</p>
+                    </div>
+                  ) : (
+                    messages.map(renderMessage)
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+              </div>
+
+              <form onSubmit={handleSendMessage} className="border-t border-border p-4">
+                <div className="flex gap-2">
+                  <Textarea
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault()
+                        handleSendMessage(e)
+                      }
+                    }}
+                    placeholder={connectionState === "connected" ? "Type a message..." : "Waiting for connection..."}
+                    disabled={connectionState !== "connected"}
+                    className="min-h-[44px] max-h-[100px] resize-none"
+                  />
+                  <Button type="submit" size="icon" disabled={!message.trim() || connectionState !== "connected"}>
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </div>
+              </form>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      <SharePanel isOpen={isShareOpen} onClose={() => setIsShareOpen(false)} onShare={handleShareProfile} />
+      {/* Control Bar */}
+      <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-border bg-background/80 px-4 py-3 backdrop-blur-xl lg:left-0 lg:right-96">
+        <div className="mx-auto flex max-w-lg items-center justify-center gap-2 md:gap-4">
+          {type === "video" && (
+            <>
+              <Button
+                variant={isVideoEnabled ? "secondary" : "destructive"}
+                size="icon"
+                onClick={toggleVideo}
+                className="h-12 w-12 rounded-full"
+              >
+                {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
+              </Button>
+              <Button
+                variant={isAudioEnabled ? "secondary" : "destructive"}
+                size="icon"
+                onClick={toggleAudio}
+                className="h-12 w-12 rounded-full"
+              >
+                {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
+              </Button>
+              <Button
+                variant={isRemoteAudioMuted ? "destructive" : "secondary"}
+                size="icon"
+                onClick={toggleRemoteAudio}
+                className="h-12 w-12 rounded-full"
+                title={isRemoteAudioMuted ? "Unmute peer" : "Mute peer"}
+              >
+                {isRemoteAudioMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+              </Button>
+            </>
+          )}
+
+          <Button variant="outline" size="icon" onClick={handleSkip} className="h-12 w-12 rounded-full bg-transparent">
+            <SkipForward className="h-5 w-5" />
+          </Button>
+
+          <Button variant="destructive" size="icon" onClick={handleLeave} className="h-12 w-12 rounded-full">
+            <PhoneOff className="h-5 w-5" />
+          </Button>
+        </div>
+      </div>
+
+      <SharePanel isOpen={isShareOpen} onClose={() => setIsShareOpen(false)} onShareProfile={handleShareProfile} />
+
       <ReportModal
         isOpen={isReportOpen}
         onClose={() => setIsReportOpen(false)}
@@ -988,73 +1030,6 @@ export function VideoRoom({
         roomId={roomId}
         onAutoDisconnect={handleReportAutoDisconnect}
       />
-
-      {/* Controls bar - Added remote audio mute button */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ delay: 0.2 }}
-        className="absolute bottom-0 left-0 right-0 flex items-center justify-center gap-3 border-t border-border bg-background/80 p-4 backdrop-blur-xl lg:left-0 lg:right-96"
-      >
-        <Button
-          variant={isAudioEnabled ? "secondary" : "destructive"}
-          size="lg"
-          onClick={toggleAudio}
-          className="h-12 w-12 rounded-full p-0"
-          title={isAudioEnabled ? "Mute microphone" : "Unmute microphone"}
-        >
-          {isAudioEnabled ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
-        </Button>
-
-        <Button
-          variant={isVideoEnabled ? "secondary" : "destructive"}
-          size="lg"
-          onClick={toggleVideo}
-          className="h-12 w-12 rounded-full p-0"
-          title={isVideoEnabled ? "Turn off camera" : "Turn on camera"}
-        >
-          {isVideoEnabled ? <Video className="h-5 w-5" /> : <VideoOff className="h-5 w-5" />}
-        </Button>
-
-        {/* Remote audio control */}
-        <Button
-          variant={isRemoteAudioMuted ? "destructive" : "secondary"}
-          size="lg"
-          onClick={toggleRemoteAudio}
-          className="h-12 w-12 rounded-full p-0"
-          title={isRemoteAudioMuted ? "Unmute peer audio" : "Mute peer audio"}
-        >
-          {isRemoteAudioMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
-        </Button>
-
-        <Button variant="secondary" size="lg" onClick={handleSkip} className="h-12 gap-2 rounded-full px-6">
-          <SkipForward className="h-5 w-5" />
-          <span className="hidden sm:inline">Next</span>
-        </Button>
-
-        <Button
-          variant="secondary"
-          size="lg"
-          onClick={() => setIsShareOpen(!isShareOpen)}
-          className="h-12 w-12 rounded-full p-0"
-        >
-          <Share2 className="h-5 w-5" />
-        </Button>
-
-        <Button
-          variant="secondary"
-          size="lg"
-          onClick={() => setIsChatOpen(!isChatOpen)}
-          className="h-12 w-12 rounded-full p-0 lg:hidden"
-        >
-          <MessageSquare className="h-5 w-5" />
-        </Button>
-
-        <Button variant="destructive" size="lg" onClick={handleLeave} className="h-12 gap-2 rounded-full px-6">
-          <PhoneOff className="h-5 w-5" />
-          <span className="hidden sm:inline">Leave</span>
-        </Button>
-      </motion.div>
     </div>
   )
 }
