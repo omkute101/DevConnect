@@ -788,13 +788,28 @@ export function VideoRoom({
           {type === "video" && (
             <div className="absolute bottom-24 right-6 h-32 w-48 overflow-hidden rounded-xl border border-border bg-secondary shadow-lg">
               {localStream ? (
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="h-full w-full object-cover"
-                />
+                <div className="relative h-full w-full">
+                  <video
+                    ref={localVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="h-full w-full object-cover"
+                    onLoadedMetadata={() => {
+                      console.log("Local video metadata loaded")
+                      localVideoRef.current?.play().catch(e => console.error("Local play fail", e))
+                    }}
+                  />
+                  <div className="absolute top-0 left-0 bg-black/50 text-[10px] text-white p-1 pointer-events-none">
+                    L: {localStream.id.slice(0, 4)}<br/>
+                    A: {localStream.active ? "T" : "F"}<br/>
+                    T: {localStream.getTracks().length}<br/>
+                    V: {localStream.getVideoTracks().length}<br/>
+                    E: {localStream.getVideoTracks()[0]?.enabled ? "T" : "F"}<br/>
+                    M: {localStream.getVideoTracks()[0]?.muted ? "T" : "F"}<br/>
+                    S: {localStream.getVideoTracks()[0]?.readyState}
+                  </div>
+                </div>
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-secondary">
                   <VideoOff className="h-8 w-8 text-muted-foreground" />
