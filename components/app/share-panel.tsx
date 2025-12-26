@@ -15,10 +15,10 @@ import { cn } from "@/lib/utils"
 interface SharePanelProps {
   isOpen: boolean
   onClose: () => void
-  onShare?: (profile: ReturnType<typeof useProfile>["profile"]) => void
+  onShareProfile?: (profile: ReturnType<typeof useProfile>["profile"]) => void
 }
 
-export function SharePanel({ isOpen, onClose, onShare }: SharePanelProps) {
+export function SharePanel({ isOpen, onClose, onShareProfile }: SharePanelProps) {
   const { profile, updateProfile, toggleTechStack, toggleAnonymous } = useProfile()
   const [shared, setShared] = useState(false)
   const [errors, setErrors] = useState<Record<string, string>>({})
@@ -50,7 +50,7 @@ export function SharePanel({ isOpen, onClose, onShare }: SharePanelProps) {
     }
 
     setShared(true)
-    onShare?.(profile)
+    onShareProfile?.(profile)
     setTimeout(() => setShared(false), 2000)
   }
 

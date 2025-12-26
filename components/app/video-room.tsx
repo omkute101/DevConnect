@@ -64,7 +64,7 @@ export function VideoRoom({
 }: VideoRoomProps) {
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle")
   const [localStream, setLocalStream] = useState<MediaStream | null>(null)
-  const [remoteStreamReady, setRemoteStreamReady] = useState(0)
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null)
   const [isVideoEnabled, setIsVideoEnabled] = useState(type === "video" && !initialPermissions?.denied)
   const [isAudioEnabled, setIsAudioEnabled] = useState(type === "video" && !initialPermissions?.denied)
   const [isChatOpen, setIsChatOpen] = useState(type === "chat")
@@ -89,10 +89,7 @@ export function VideoRoom({
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([])
   const isInitializedRef = useRef(false)
   const isCleaningUpRef = useRef(false)
-  const remoteStreamRef = useRef<MediaStream | null>(null)
   const localStreamRef = useRef<MediaStream | null>(null)
-
-  const hasRemoteStream = remoteStreamReady > 0 && remoteStreamRef.current !== null
 
   const getLocalStream = useCallback(async (): Promise<MediaStream | null> => {
     try {
@@ -255,15 +252,19 @@ export function VideoRoom({
   }, [roomId])
 
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStreamRef.current) {
-      console.log("[v0] Attaching remote stream to video element, tracks:", remoteStreamRef.current.getTracks().length)
-      remoteVideoRef.current.srcObject = remoteStreamRef.current
+    if (remoteVideoRef.current && remoteStream) {
+      console.log("[v0] Attaching remote stream to video element, tracks:", remoteStream.getTracks().length)
+      remoteVideoRef.current.srcObject = remoteStream
       remoteVideoRef.current.muted = isRemoteAudioMuted
-      remoteVideoRef.current.play().catch((e) => {
-        console.log("[v0] Remote video play failed (user interaction may be needed):", e.message)
-      })
+      
+      const playPromise = remoteVideoRef.current.play()
+      if (playPromise !== undefined) {
+        playPromise.catch((e) => {
+          console.log("[v0] Remote video play failed:", e.message)
+        })
+      }
     }
-  }, [remoteStreamReady, isRemoteAudioMuted])
+  }, [remoteStream, isRemoteAudioMuted])
 
   useEffect(() => {
     if (localVideoRef.current && localStreamRef.current) {
@@ -323,22 +324,13 @@ export function VideoRoom({
         }
 
         pc.ontrack = (event) => {
-          console.log("[v0] Received remote track:", event.track.kind, "readyState:", event.track.readyState)
-
-          // Create remote stream if it doesn't exist
-          if (!remoteStreamRef.current) {
-            remoteStreamRef.current = new MediaStream()
-            console.log("[v0] Created new remote MediaStream")
-          }
-
-          // Check if track already exists
-          const existingTrack = remoteStreamRef.current.getTracks().find((t) => t.id === event.track.id)
-          if (!existingTrack) {
-            remoteStreamRef.current.addTrack(event.track)
-            console.log("[v0] Added track to remote stream, total tracks:", remoteStreamRef.current.getTracks().length)
-          }
-
-          setRemoteStreamReady((prev) => prev + 1)
+          console.log("[v0] Received remote track:", event.track.kind, event.track.enabled)
+          
+          setRemoteStream(prev => {
+            const newStream = new MediaStream(prev ? prev.getTracks() : [])
+            newStream.addTrack(event.track)
+            return newStream
+          })
 
           // Track event handlers
           event.track.onended = () => {
@@ -350,7 +342,7 @@ export function VideoRoom({
           }
 
           event.track.onunmute = () => {
-            console.log("[v0] Remote track unmuted:", event.track.kind)
+             console.log("[v0] Remote track unmuted:", event.track.kind)
           }
         }
 
@@ -467,7 +459,7 @@ export function VideoRoom({
         dataChannelRef.current?.close()
         peerConnectionRef.current?.close()
         localStreamRef.current?.getTracks().forEach((track) => track.stop())
-        remoteStreamRef.current = null
+        setRemoteStream(null)
       }
     }
   }, [])
@@ -525,8 +517,7 @@ export function VideoRoom({
     peerConnectionRef.current = null
     dataChannelRef.current = null
     pendingCandidatesRef.current = []
-    remoteStreamRef.current = null
-    setRemoteStreamReady(0)
+    setRemoteStream(null)
     setConnectionState("idle")
   }, [])
 
@@ -789,16 +780,17 @@ export function VideoRoom({
     <div className="flex h-[calc(100vh-4rem)] flex-col lg:flex-row">
       <div className="relative flex-1 bg-card">
         <div className="relative h-full w-full overflow-hidden bg-secondary">
-          <video
+           <video
+            key={remoteStream?.id}
             ref={remoteVideoRef}
             autoPlay
             playsInline
             muted={isRemoteAudioMuted}
-            className={`h-full w-full object-cover ${!hasRemoteStream ? "invisible" : ""}`}
+            className={`h-full w-full object-cover ${!remoteStream ? "invisible" : ""}`}
           />
 
           {/* Show placeholder when no remote stream */}
-          {!hasRemoteStream && (
+          {!remoteStream && (
             <div className="absolute inset-0 flex items-center justify-center bg-secondary">
               <div className="text-center">
                 <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-foreground border-t-transparent" />
@@ -848,12 +840,13 @@ export function VideoRoom({
             <div className="absolute bottom-24 right-6 h-32 w-48 overflow-hidden rounded-xl border border-border bg-secondary shadow-lg">
               {localStream ? (
                 <video
+                  key={localStream.id}
                   ref={localVideoRef}
                   autoPlay
                   playsInline
                   muted
-                  className="h-full w-full object-cover"
                   style={{ transform: "scaleX(-1)" }}
+                  className="h-full w-full object-cover"
                 />
               ) : (
                 <div className="flex h-full w-full items-center justify-center bg-secondary">
