@@ -90,6 +90,7 @@ export function VideoRoom({
   const isInitializedRef = useRef(false)
   const isCleaningUpRef = useRef(false)
   const localStreamRef = useRef<MediaStream | null>(null)
+  const remoteStreamRef = useRef<MediaStream | null>(null)
 
   const getLocalStream = useCallback(async (): Promise<MediaStream | null> => {
     try {
@@ -251,28 +252,62 @@ export function VideoRoom({
     }
   }, [roomId])
 
+  // Attach remote stream to video element
   useEffect(() => {
-    if (remoteVideoRef.current && remoteStream) {
-      console.log("[v0] Attaching remote stream to video element, tracks:", remoteStream.getTracks().length)
-      remoteVideoRef.current.srcObject = remoteStream
-      remoteVideoRef.current.muted = isRemoteAudioMuted
+    const videoEl = remoteVideoRef.current
+    const stream = remoteStreamRef.current
+    
+    if (videoEl && stream) {
+      console.log("[v0] Attaching remote stream to video element, tracks:", stream.getTracks().length)
       
-      const playPromise = remoteVideoRef.current.play()
-      if (playPromise !== undefined) {
-        playPromise.catch((e) => {
-          console.log("[v0] Remote video play failed:", e.message)
-        })
+      // Only set srcObject if it's different
+      if (videoEl.srcObject !== stream) {
+        videoEl.srcObject = stream
       }
+      
+      videoEl.muted = isRemoteAudioMuted
+      
+      // Force play
+      const playVideo = async () => {
+        try {
+          await videoEl.play()
+          console.log("[v0] Remote video playing")
+        } catch (e: unknown) {
+          const error = e as Error
+          console.log("[v0] Remote video play failed:", error.message)
+          // Retry after a short delay
+          setTimeout(async () => {
+            try {
+              await videoEl.play()
+              console.log("[v0] Remote video playing after retry")
+            } catch (e2) {
+              console.log("[v0] Remote video play retry failed")
+            }
+          }, 500)
+        }
+      }
+      playVideo()
     }
   }, [remoteStream, isRemoteAudioMuted])
 
+  // Attach local stream to video element
   useEffect(() => {
-    if (localVideoRef.current && localStreamRef.current) {
-      console.log("[v0] Attaching local stream to video element")
-      localVideoRef.current.srcObject = localStreamRef.current
-      localVideoRef.current.muted = true
-      localVideoRef.current.play().catch((e) => {
-        console.log("[v0] Local video play failed:", e.message)
+    const videoEl = localVideoRef.current
+    const stream = localStreamRef.current
+    
+    if (videoEl && stream) {
+      console.log("[v0] Attaching local stream to video element, tracks:", stream.getTracks().length)
+      
+      // Only set srcObject if it's different
+      if (videoEl.srcObject !== stream) {
+        videoEl.srcObject = stream
+      }
+      
+      videoEl.muted = true
+      
+      videoEl.play().catch((e: unknown) => {
+        const error = e as Error
+        console.log("[v0] Local video play failed:", error.message)
       })
     }
   }, [localStream])
@@ -326,11 +361,28 @@ export function VideoRoom({
         pc.ontrack = (event) => {
           console.log("[v0] Received remote track:", event.track.kind, event.track.enabled)
           
-          setRemoteStream(prev => {
-            const newStream = new MediaStream(prev ? prev.getTracks() : [])
-            newStream.addTrack(event.track)
-            return newStream
-          })
+          // Use existing stream or create new one (only once)
+          if (!remoteStreamRef.current) {
+            remoteStreamRef.current = new MediaStream()
+          }
+          
+          // Add track to persistent stream if not already present
+          const existingTrack = remoteStreamRef.current.getTracks().find(t => t.id === event.track.id)
+          if (!existingTrack) {
+            remoteStreamRef.current.addTrack(event.track)
+            console.log("[v0] Added track to remote stream, total tracks:", remoteStreamRef.current.getTracks().length)
+          }
+          
+          // Update state to trigger re-render and video attachment
+          setRemoteStream(remoteStreamRef.current)
+          
+          // Directly attach to video element for immediate feedback
+          if (remoteVideoRef.current && remoteStreamRef.current) {
+            remoteVideoRef.current.srcObject = remoteStreamRef.current
+            remoteVideoRef.current.play().catch((e: unknown) => {
+              console.log("[v0] Direct remote video play failed:", (e as Error).message)
+            })
+          }
 
           // Track event handlers
           event.track.onended = () => {
@@ -459,6 +511,8 @@ export function VideoRoom({
         dataChannelRef.current?.close()
         peerConnectionRef.current?.close()
         localStreamRef.current?.getTracks().forEach((track) => track.stop())
+        remoteStreamRef.current?.getTracks().forEach((track) => track.stop())
+        remoteStreamRef.current = null
         setRemoteStream(null)
       }
     }
@@ -517,6 +571,8 @@ export function VideoRoom({
     peerConnectionRef.current = null
     dataChannelRef.current = null
     pendingCandidatesRef.current = []
+    remoteStreamRef.current?.getTracks().forEach((track) => track.stop())
+    remoteStreamRef.current = null
     setRemoteStream(null)
     setConnectionState("idle")
   }, [])
@@ -781,7 +837,6 @@ export function VideoRoom({
       <div className="relative flex-1 bg-card">
         <div className="relative h-full w-full overflow-hidden bg-secondary">
            <video
-            key={remoteStream?.id}
             ref={remoteVideoRef}
             autoPlay
             playsInline
@@ -840,7 +895,6 @@ export function VideoRoom({
             <div className="absolute bottom-24 right-6 h-32 w-48 overflow-hidden rounded-xl border border-border bg-secondary shadow-lg">
               {localStream ? (
                 <video
-                  key={localStream.id}
                   ref={localVideoRef}
                   autoPlay
                   playsInline
