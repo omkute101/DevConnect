@@ -33,7 +33,7 @@ export default function HomePage() {
             transition={{ duration: 1, delay: 0.2, ease: [0.16, 1, 0.3, 1] }}
             className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl xl:text-8xl font-semibold tracking-tight text-foreground leading-[1.1] text-balance"
           >
-            Meet developers.
+            Meet developers,
             <br />
             <span className="text-muted-foreground">Instantly.</span>
           </motion.h1>
@@ -44,7 +44,7 @@ export default function HomePage() {
             transition={{ duration: 1, delay: 0.4, ease: [0.16, 1, 0.3, 1] }}
             className="mt-8 md:mt-10 text-muted-foreground text-base md:text-lg lg:text-xl max-w-xl mx-auto leading-relaxed text-pretty"
           >
-            One click. Real conversations. No profiles, no swiping—just you and another developer, face to face.
+            One click. Real conversations. Just you and another developer, face to face.
           </motion.p>
 
           <motion.div

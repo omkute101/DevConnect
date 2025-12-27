@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     const { action } = body
 
     // Update heartbeat
-    await redis.set(keys.heartbeat(sessionId), Date.now().toString(), "EX", 30)
+    await redis.set(keys.heartbeat(sessionId), Date.now().toString(), { ex: 30 })
 
     switch (action) {
       case "join-queue": {
@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
           }
 
           // Check if peer is still active (heartbeat within last 30s)
-          const peerHeartbeat = await redis.get(keys.heartbeat(peerId))
+          const peerHeartbeat = await redis.get<string>(keys.heartbeat(peerId))
           if (!peerHeartbeat || Date.now() - Number.parseInt(peerHeartbeat) > 30000) {
             // Peer is stale, try next
             attempts++
@@ -99,11 +99,11 @@ export async function POST(request: NextRequest) {
           }
 
           // Store room with 1 hour TTL
-          await redis.set(keys.room(roomId), JSON.stringify(room), "EX", 3600)
+          await redis.set(keys.room(roomId), JSON.stringify(room), { ex: 3600 })
 
           // Map both sessions to room
-          await redis.set(keys.sessionRoom(sessionId), roomId, "EX", 3600)
-          await redis.set(keys.sessionRoom(peerId), roomId, "EX", 3600)
+          await redis.set(keys.sessionRoom(sessionId), roomId, { ex: 3600 })
+          await redis.set(keys.sessionRoom(peerId), roomId, { ex: 3600 })
 
           // Notify the waiting peer by storing match info
           await redis.set(
@@ -113,8 +113,7 @@ export async function POST(request: NextRequest) {
               peerId: sessionId,
               isInitiator: false,
             }),
-            "EX",
-            60,
+            { ex: 60 }
           )
 
           return NextResponse.json({
@@ -248,8 +247,7 @@ export async function POST(request: NextRequest) {
               JSON.stringify({
                 type: "left",
               }),
-              "EX",
-              10,
+              { ex: 10 }
             )
           }
         }
@@ -290,9 +288,9 @@ export async function POST(request: NextRequest) {
           lastActivity: now,
         }
 
-        await redis.set(keys.room(newRoomId), JSON.stringify(room), "EX", 3600)
-        await redis.set(keys.sessionRoom(sessionId), newRoomId, "EX", 3600)
-        await redis.set(keys.sessionRoom(peerId), newRoomId, "EX", 3600)
+        await redis.set(keys.room(newRoomId), JSON.stringify(room), { ex: 3600 })
+        await redis.set(keys.sessionRoom(sessionId), newRoomId, { ex: 3600 })
+        await redis.set(keys.sessionRoom(peerId), newRoomId, { ex: 3600 })
 
         await redis.set(
           `match:${peerId}`,
@@ -301,8 +299,7 @@ export async function POST(request: NextRequest) {
             peerId: sessionId,
             isInitiator: false,
           }),
-          "EX",
-          60,
+          { ex: 60 }
         )
 
         return NextResponse.json({
@@ -336,8 +333,7 @@ export async function POST(request: NextRequest) {
                 JSON.stringify({
                   type: "left",
                 }),
-                "EX",
-                10,
+                { ex: 10 }
               )
             }
           }

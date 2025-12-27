@@ -29,7 +29,7 @@ export default function AppPage() {
   }, [])
 
   const onPeerLeft = useCallback(() => {
-    setPeerLeftMessage("The developer has left... Don't worry, we'll connect you to new developers!")
+    setPeerLeftMessage("Your peer left the session...")
     setAppState("matching")
   }, [])
 

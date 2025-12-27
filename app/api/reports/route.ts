@@ -1,13 +1,24 @@
 // API route for handling user reports with rate limiting and session validation
+// Now uses Redis for storage to enable horizontal scaling
 
 import { NextResponse } from "next/server"
 import { verifySessionToken, incrementReportCount } from "@/lib/session"
 import { checkRateLimit, RATE_LIMITS } from "@/lib/rate-limiter"
+import { redis } from "@/lib/redis"
 
 export const runtime = "nodejs"
 
-// In-memory storage for reports (use database in production)
-const reports: Array<{
+// Redis key helpers
+const keys = {
+  reports: () => "reports:list",
+  reportedSession: (sessionId: string) => `reported:${sessionId}`,
+  reportById: (id: string) => `report:${id}`,
+}
+
+const AUTO_DISCONNECT_THRESHOLD = 3
+const REPORT_TTL = 7 * 24 * 60 * 60 // 7 days
+
+interface Report {
   id: string
   reporterSessionId: string
   reportedSessionId: string
@@ -16,26 +27,22 @@ const reports: Array<{
   details?: string
   timestamp: number
   status: "pending" | "reviewed" | "resolved"
-}> = []
+}
 
-// Track reported sessions for auto-disconnect
-const reportedSessions = new Map<string, number>()
-const AUTO_DISCONNECT_THRESHOLD = 3
-
-function getSessionFromRequest(request: Request): { sessionId: string } | null {
+async function getSessionFromRequest(request: Request): Promise<{ sessionId: string } | null> {
   const authHeader = request.headers.get("authorization")
   if (!authHeader?.startsWith("Bearer ")) return null
 
   const token = authHeader.slice(7)
-  const payload = verifySessionToken(token)
-  if (!payload) return null
+  const payload = await verifySessionToken(token)
+  if (!payload || !payload.sessionId) return null
 
   return { sessionId: payload.sessionId }
 }
 
 export async function POST(request: Request) {
   try {
-    const tokenSession = getSessionFromRequest(request)
+    const tokenSession = await getSessionFromRequest(request)
     const body = await request.json()
     const { reportedSessionId, roomId, reason, details } = body
 
@@ -45,7 +52,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 })
     }
 
-    const rateLimit = checkRateLimit(`report:${reporterSessionId}`, RATE_LIMITS.report)
+    const rateLimit = await checkRateLimit(`report:${reporterSessionId}`, RATE_LIMITS.report)
     if (!rateLimit.allowed) {
       return NextResponse.json({ success: false, error: "Too many reports. Please try again later." }, { status: 429 })
     }
@@ -59,7 +66,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: "Cannot report yourself" }, { status: 400 })
     }
 
-    const report = {
+    const report: Report = {
       id: `report-${Date.now()}-${Math.random().toString(36).substring(7)}`,
       reporterSessionId,
       reportedSessionId,
@@ -67,16 +74,23 @@ export async function POST(request: Request) {
       reason,
       details,
       timestamp: Date.now(),
-      status: "pending" as const,
+      status: "pending",
     }
 
-    reports.push(report)
+    // Store report in Redis
+    await redis.rpush(keys.reports(), JSON.stringify(report))
+    await redis.set(keys.reportById(report.id), JSON.stringify(report), { ex: REPORT_TTL })
 
-    const reportCount = incrementReportCount(reportedSessionId)
+    // Increment report count in session (Redis-backed)
+    await incrementReportCount(reportedSessionId)
 
-    // Track for auto-disconnect
-    const currentCount = (reportedSessions.get(reportedSessionId) || 0) + 1
-    reportedSessions.set(reportedSessionId, currentCount)
+    // Track for auto-disconnect using Redis atomic increment
+    const currentCount = await redis.incr(keys.reportedSession(reportedSessionId))
+    
+    // Set expiry on first report (24 hours for tracking)
+    if (currentCount === 1) {
+      await redis.expire(keys.reportedSession(reportedSessionId), 24 * 60 * 60)
+    }
 
     const shouldAutoDisconnect = currentCount >= AUTO_DISCONNECT_THRESHOLD
 
@@ -93,16 +107,27 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const url = new URL(request.url)
-  const status = url.searchParams.get("status")
+  try {
+    const url = new URL(request.url)
+    const status = url.searchParams.get("status")
 
-  let filteredReports = reports
-  if (status) {
-    filteredReports = reports.filter((r) => r.status === status)
+    // Get last 100 reports from Redis
+    const reportStrings = await redis.lrange(keys.reports(), -100, -1)
+    let reports: Report[] = reportStrings.map((s) => JSON.parse(s as string))
+
+    if (status) {
+      reports = reports.filter((r) => r.status === status)
+    }
+
+    return NextResponse.json({
+      reports,
+      total: reports.length,
+    })
+  } catch (error) {
+    console.error("Get reports error:", error)
+    return NextResponse.json({
+      reports: [],
+      total: 0,
+    })
   }
-
-  return NextResponse.json({
-    reports: filteredReports.slice(-100), // Return last 100 reports
-    total: filteredReports.length,
-  })
 }

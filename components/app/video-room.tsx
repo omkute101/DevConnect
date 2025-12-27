@@ -738,8 +738,8 @@ export function VideoRoom({
             </div>
           </div>
           <div className="space-y-2">
-            <h3 className="text-xl font-semibold tracking-tight">Establishing Secure Connection</h3>
-            <p className="text-muted-foreground">Connecting with peer...</p>
+            <h3 className="text-xl font-semibold tracking-tight">You have Matched!</h3>
+            <p className="text-muted-foreground">Establishing connection...</p>
           </div>
         </div>
       </div>

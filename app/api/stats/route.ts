@@ -1,43 +1,79 @@
 // API route for getting platform statistics
-// Uses Redis for real-time stats
+// Uses Redis for real-time stats with optimized commands
 
 import { NextResponse } from "next/server"
 import { redis } from "@/lib/redis"
-import { getActiveSessionCount } from "@/lib/session"
 import type { AppMode } from "@/app/app/page"
 
 async function getQueueStats(): Promise<Record<AppMode, number>> {
-  const modes: AppMode[] = ["casual", "pitch", "collab", "hiring", "review"]
+  const modes: AppMode[] = ["casual", "pitch", "collab", "hire", "freelance", "review"]
   const types = ["video", "chat"]
 
-  const stats: Record<AppMode, number> = {
+  const stats: Record<string, number> = {
     casual: 0,
     pitch: 0,
     collab: 0,
-    hiring: 0,
+    hire: 0,
+    freelance: 0,
     review: 0,
   }
 
+  // Use pipeline for efficient batch operations
+  const pipeline = redis.pipeline()
+  
   for (const mode of modes) {
     for (const type of types) {
-      const count = await redis.llen(`queue:${mode}:${type}`)
-      stats[mode] += count
+      pipeline.llen(`queue:${mode}:${type}`)
     }
   }
 
-  return stats
+  const results = await pipeline.exec()
+  
+  // Process results - each mode has 2 queue types (video, chat)
+  let resultIndex = 0
+  for (const mode of modes) {
+    for (let t = 0; t < types.length; t++) {
+      const count = results[resultIndex] as number | null
+      stats[mode] += count || 0
+      resultIndex++
+    }
+  }
+
+  return stats as Record<AppMode, number>
 }
 
+// Counter-based room tracking instead of expensive KEYS command
+const ROOM_COUNTER_KEY = "stats:active_rooms"
+
 async function getActiveRoomCount(): Promise<number> {
-  const keys = await redis.keys("room:*")
-  return keys.length
+  // Use a counter instead of scanning keys
+  // The counter should be incremented when rooms are created and decremented when destroyed
+  // For backward compatibility, we'll use llen on a tracking list
+  try {
+    const count = await redis.get<number>(ROOM_COUNTER_KEY)
+    return count || 0
+  } catch {
+    return 0
+  }
+}
+
+async function getActiveSessionCount(): Promise<number> {
+  // Use a counter instead of scanning all session keys
+  try {
+    const count = await redis.get<number>("active-session-count")
+    return count || 0
+  } catch {
+    return 0
+  }
 }
 
 export async function GET() {
   try {
-    const queueStats = await getQueueStats()
-    const activeRooms = await getActiveRoomCount()
-    const activeSessions = await getActiveSessionCount()
+    const [queueStats, activeRooms, activeSessions] = await Promise.all([
+      getQueueStats(),
+      getActiveRoomCount(),
+      getActiveSessionCount(),
+    ])
 
     // Add some base numbers for demo purposes when no real users
     const baseOnline = 247
@@ -52,7 +88,8 @@ export async function GET() {
           casual: queueStats.casual + 50,
           pitch: queueStats.pitch + 25,
           collab: queueStats.collab + 35,
-          hiring: queueStats.hiring + 15,
+          hire: queueStats.hire + 15,
+          freelance: queueStats.freelance + 20,
           review: queueStats.review + 30,
         },
         realtime: {
@@ -74,7 +111,7 @@ export async function GET() {
         online: 247,
         totalConnections: 2847293,
         todayConnections: 12847,
-        byMode: { casual: 50, pitch: 25, collab: 35, hiring: 15, review: 30 },
+        byMode: { casual: 50, pitch: 25, collab: 35, hire: 15, freelance: 20, review: 30 },
         realtime: { activeRooms: 0, waitingByMode: {}, totalWaiting: 0 },
       },
       { headers: { "Cache-Control": "no-store, max-age=0" } },

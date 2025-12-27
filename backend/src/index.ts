@@ -119,14 +119,51 @@ async function initRedis() {
   subClient = pubClient.duplicate()
   redisClient = pubClient.duplicate()
 
+  // Error handlers with reconnection
   pubClient.on("error", (err) => console.error("Redis Pub Client Error:", err))
   subClient.on("error", (err) => console.error("Redis Sub Client Error:", err))
   redisClient.on("error", (err) => console.error("Redis Client Error:", err))
+
+  // Reconnection handlers
+  pubClient.on("reconnecting", () => console.log("Redis Pub Client reconnecting..."))
+  subClient.on("reconnecting", () => console.log("Redis Sub Client reconnecting..."))
+  redisClient.on("reconnecting", () => console.log("Redis Client reconnecting..."))
 
   await Promise.all([pubClient.connect(), subClient.connect(), redisClient.connect()])
 
   console.log("Connected to Redis successfully")
 }
+
+// Graceful shutdown handler
+async function gracefulShutdown(signal: string) {
+  console.log(`\n${signal} received. Closing Redis connections...`)
+  
+  try {
+    if (io) {
+      io.close()
+      console.log("Socket.IO server closed")
+    }
+    
+    await Promise.all([
+      pubClient?.quit(),
+      subClient?.quit(),
+      redisClient?.quit(),
+    ])
+    console.log("Redis connections closed successfully")
+  } catch (error) {
+    console.error("Error during shutdown:", error)
+  }
+  
+  process.exit(0)
+}
+
+// Register shutdown handlers
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"))
+process.on("SIGINT", () => gracefulShutdown("SIGINT"))
+
+// Export Redis client for reuse by other modules
+export { redisClient }
+
 
 function getQueueKey(mode: string, connectionType: string): string {
   return `queue:${mode}:${connectionType}`

@@ -1,12 +1,7 @@
-// Rate limiting for API routes
-// Prevents abuse and ensures fair usage
+// Redis-backed rate limiting for API routes
+// Enables horizontal scaling by using shared Redis state
 
-interface RateLimitEntry {
-  count: number
-  resetAt: number
-}
-
-const rateLimits = new Map<string, RateLimitEntry>()
+import { redis } from "@/lib/redis"
 
 export interface RateLimitConfig {
   windowMs: number // Time window in milliseconds
@@ -20,40 +15,58 @@ export const RATE_LIMITS = {
   default: { windowMs: 1000, maxRequests: 100 }, // 100 per second
 } as const
 
-export function checkRateLimit(
+/**
+ * Redis-backed rate limiter using sliding window algorithm
+ * Works across all serverless instances for horizontal scaling
+ */
+export async function checkRateLimit(
   identifier: string,
-  config: RateLimitConfig = RATE_LIMITS.default,
-): { allowed: boolean; remaining: number; resetIn: number } {
+  config: RateLimitConfig = RATE_LIMITS.default
+): Promise<{ allowed: boolean; remaining: number; resetIn: number }> {
+  const key = `ratelimit:${identifier}`
   const now = Date.now()
-  const key = identifier
+  const windowStart = now - config.windowMs
 
-  let entry = rateLimits.get(key)
+  try {
+    // Use Redis pipeline for atomic operations
+    const pipeline = redis.pipeline()
+    
+    // Remove old entries outside the window
+    pipeline.zremrangebyscore(key, 0, windowStart)
+    
+    // Count current entries in window
+    pipeline.zcard(key)
+    
+    // Add current request with timestamp as score
+    pipeline.zadd(key, { score: now, member: `${now}-${Math.random()}` })
+    
+    // Set expiry on the key (window duration + buffer)
+    pipeline.expire(key, Math.ceil(config.windowMs / 1000) + 1)
 
-  if (!entry || now > entry.resetAt) {
-    entry = {
-      count: 0,
-      resetAt: now + config.windowMs,
-    }
-    rateLimits.set(key, entry)
+    const results = await pipeline.exec()
+    
+    // Get count from pipeline results (index 1 is zcard result)
+    const count = (results[1] as number) || 0
+    
+    const remaining = Math.max(0, config.maxRequests - count - 1)
+    const allowed = count < config.maxRequests
+    const resetIn = config.windowMs
+
+    return { allowed, remaining, resetIn }
+  } catch (error) {
+    console.error("Rate limit check failed:", error)
+    // Fail open - allow request if Redis is unavailable
+    return { allowed: true, remaining: config.maxRequests, resetIn: config.windowMs }
   }
-
-  entry.count++
-
-  const remaining = Math.max(0, config.maxRequests - entry.count)
-  const resetIn = Math.max(0, entry.resetAt - now)
-  const allowed = entry.count <= config.maxRequests
-
-  return { allowed, remaining, resetIn }
 }
 
-// Cleanup old entries periodically
-if (typeof setInterval !== "undefined") {
-  setInterval(() => {
-    const now = Date.now()
-    for (const [key, entry] of rateLimits.entries()) {
-      if (now > entry.resetAt + 60000) {
-        rateLimits.delete(key)
-      }
-    }
-  }, 60 * 1000)
+/**
+ * Clear rate limit for an identifier (useful for testing)
+ */
+export async function clearRateLimit(identifier: string): Promise<void> {
+  try {
+    await redis.del(`ratelimit:${identifier}`)
+  } catch (error) {
+    console.error("Failed to clear rate limit:", error)
+  }
 }
