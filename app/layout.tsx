@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" })
 
 export const metadata: Metadata = {
-  title: "OmniConnect - Meet Developers Instantly",
+  title: "Omnars - Meet Developers Instantly",
   description:
     "The premium platform for real-time developer connections. Video chat, collaborate, and network with developers worldwide.",
   keywords: ["developer", "networking", "video chat", "collaboration", "startup", "code review"],

@@ -26,7 +26,7 @@ export function LandingCTA() {
               collaborator?
             </h2>
             <p className="mx-auto mt-6 max-w-xl text-muted-foreground">
-              Join thousands of developers already connecting on OmniConnect. No signup required to start chatting.
+              Join thousands of developers already connecting on Omnars. No signup required to start chatting.
             </p>
             <div className="mt-10">
               <Link href="/app">

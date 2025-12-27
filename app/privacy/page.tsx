@@ -27,7 +27,7 @@ export default function PrivacyPage() {
                 The Core Promise
               </h2>
               <p className="text-muted-foreground leading-relaxed">
-                OmniConnect is designed as a raw, peer-to-peer connection utility. We facilitate the handshake; we do not participate in the conversation.
+                Omnars is designed as a raw, peer-to-peer connection utility. We facilitate the handshake; we do not participate in the conversation.
                 <br /><br />
                 <strong>We do not record, store, or monitor your audio, video, or chat messages.</strong> Once a session ends, the connection is severed, and no record of the conversation remains on our servers.
               </p>
@@ -35,7 +35,7 @@ export default function PrivacyPage() {
 
             {/* 1. Architecture */}
             <section className="space-y-4">
-              <h2 className="text-2xl font-bold">1. How OmniConnect Works (The Technical Reality)</h2>
+              <h2 className="text-2xl font-bold">1. How Omnars Works (The Technical Reality)</h2>
               <p className="text-muted-foreground leading-relaxed">
                 To understand our privacy policy, you must understand our architecture:
               </p>
@@ -109,7 +109,7 @@ export default function PrivacyPage() {
              <section className="space-y-4">
               <h2 className="text-2xl font-bold">4. Your Responsibility & Risks</h2>
               <p className="text-muted-foreground leading-relaxed">
-                Because OmniConnect is peer-to-peer and anonymous, <strong>you are solely responsible for what you share.</strong>
+                Because Omnars is peer-to-peer and anonymous, <strong>you are solely responsible for what you share.</strong>
               </p>
               <ul className="list-disc list-inside space-y-2 text-muted-foreground">
                 <li>If you voluntarily reveal your identity, we cannot protect that information.</li>

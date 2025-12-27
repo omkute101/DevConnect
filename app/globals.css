@@ -3,7 +3,7 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Premium black & white design system for OmniConnect */
+/* Premium black & white design system for Omnars */
 :root {
   --background: oklch(0.07 0 0);
   --foreground: oklch(0.98 0 0);
@@ -119,6 +119,7 @@
   * {
     @apply border-border outline-ring/50;
   }
+
   html,
   body {
     height: 100%;
@@ -128,6 +129,7 @@
     overscroll-behavior: none;
     @apply bg-background text-foreground;
   }
+
   /* Add pointer cursor to all buttons globally */
   button,
   [role="button"],
@@ -138,20 +140,24 @@
 
 /* Custom animations */
 @keyframes pulse-glow {
+
   0%,
   100% {
     opacity: 0.4;
   }
+
   50% {
     opacity: 0.8;
   }
 }
 
 @keyframes float {
+
   0%,
   100% {
     transform: translateY(0px);
   }
+
   50% {
     transform: translateY(-10px);
   }

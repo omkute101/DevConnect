@@ -1,4 +1,4 @@
-// OmniConnect Backend Service
+// Omnars Backend Service
 // Node.js + Express + Socket.IO server for real-time matchmaking and WebRTC signaling
 
 import dotenv from "dotenv"
@@ -39,7 +39,7 @@ interface Match {
 // Environment variables
 const PORT = process.env.PORT || 8080
 const REDIS_URL = process.env.REDIS_URL || process.env.KV_URL || "redis://localhost:6379"
-const JWT_SECRET = process.env.SESSION_SECRET || process.env.JWT_SECRET || "omniconnect-anonymous-session-secret-2024"
+const JWT_SECRET = process.env.SESSION_SECRET || process.env.JWT_SECRET || "Omnars-anonymous-session-secret-2024"
 const CORS_ORIGIN = process.env.CORS_ORIGIN || "*"
 
 // Log JWT secret hash for debugging (not the actual secret)
@@ -830,7 +830,7 @@ async function main() {
   })
 
   httpServer.listen(PORT, () => {
-    console.log(`OmniConnect backend running on port ${PORT}`)
+    console.log(`Omnars backend running on port ${PORT}`)
     console.log(`CORS origin: ${CORS_ORIGIN}`)
   })
 }

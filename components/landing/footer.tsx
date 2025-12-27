@@ -6,7 +6,7 @@ export function LandingFooter() {
       <div className="mx-auto max-w-7xl px-6">
         <div className="flex flex-col items-center justify-between gap-6 md:flex-row">
           <div className="flex items-center gap-2">
-            <span className="text-lg font-semibold">OmniConnect</span>
+            <span className="text-lg font-semibold">Omnars</span>
           </div>
 
           <div className="flex items-center gap-8">

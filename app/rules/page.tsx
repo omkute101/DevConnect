@@ -7,7 +7,7 @@ const rules = [
     icon: Code2,
     title: "Professional Developer Conduct",
     description:
-      "OmniConnect is a professional network. Approach every conversation as if you are at a tech conference or a co-working space. Keep discussions focused on technology, coding, careers, and mutual growth.",
+      "Omnars is a professional network. Approach every conversation as if you are at a tech conference or a co-working space. Keep discussions focused on technology, coding, careers, and mutual growth.",
   },
   {
     icon: Heart,
@@ -37,7 +37,7 @@ const rules = [
     icon: UserCheck,
     title: "Accountability",
     description:
-      "You are responsible for your actions. OmniConnect does not monitor chats in real-time; we rely on community reports to maintain safety.",
+      "You are responsible for your actions. Omnars does not monitor chats in real-time; we rely on community reports to maintain safety.",
   },
 ]
 
@@ -69,7 +69,7 @@ export default function RulesPage() {
             </div>
             <h1 className="text-4xl font-bold tracking-tight md:text-5xl">Community Guidelines</h1>
             <p className="mx-auto mt-4 max-w-2xl text-lg text-muted-foreground">
-              OmniConnect is a dedicated space for developers. Adhering to these standards ensures a valuable experience for everyone.
+              Omnars is a dedicated space for developers. Adhering to these standards ensures a valuable experience for everyone.
             </p>
           </div>
 
@@ -106,8 +106,8 @@ export default function RulesPage() {
               <div>
                 <h2 className="mb-2 text-lg font-semibold text-destructive">User Responsibility</h2>
                 <p className="text-sm text-muted-foreground">
-                  By using OmniConnect, you acknowledge that you connect with other users at your own risk. 
-                  OmniConnect is a facilitator, not a supervisor. We are not responsible for the conduct of any user 
+                  By using Omnars, you acknowledge that you connect with other users at your own risk. 
+                  Omnars is a facilitator, not a supervisor. We are not responsible for the conduct of any user 
                   but will remove bad actors when they are reported.
                 </p>
               </div>

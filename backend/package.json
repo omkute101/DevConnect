@@ -1,7 +1,7 @@
 {
-  "name": "omniconnect-backend",
+  "name": "Omnars-backend",
   "version": "1.0.0",
-  "description": "OmniConnect real-time backend service",
+  "description": "Omnars real-time backend service",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

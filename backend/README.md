@@ -1,6 +1,6 @@
-# OmniConnect Backend
+# Omnars Backend
 
-Real-time backend service for OmniConnect - handles WebSocket connections, matchmaking, and WebRTC signaling.
+Real-time backend service for Omnars - handles WebSocket connections, matchmaking, and WebRTC signaling.
 
 ## Architecture
 

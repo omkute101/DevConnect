@@ -20,7 +20,7 @@ export interface SessionPayload {
   exp?: number
 }
 
-const SECRET_KEY = process.env.SESSION_SECRET || "omniconnect-anonymous-session-secret-2024"
+const SECRET_KEY = process.env.SESSION_SECRET || "Omnars-anonymous-session-secret-2024"
 const SESSION_TTL = 24 * 60 * 60 // 24 hours in seconds
 
 export async function createSessionToken(sessionId: string): Promise<string> {

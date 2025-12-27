@@ -17,7 +17,7 @@ export function LandingNav() {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground">
             <span className="text-sm font-bold text-background">OC</span>
           </div>
-          <span className="text-lg font-semibold tracking-tight">OmniConnect</span>
+          <span className="text-lg font-semibold tracking-tight">Omnars</span>
         </Link>
 
         <div className="hidden items-center gap-8 md:flex">

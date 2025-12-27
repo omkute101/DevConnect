@@ -101,7 +101,7 @@ class SignalingService {
     }
 
     // Try to load from storage first
-    const stored = this.storage.getItem("omniconnect-session")
+    const stored = this.storage.getItem("Omnars-session")
     if (stored) {
       try {
         const parsed = JSON.parse(stored) as SessionData
@@ -166,7 +166,7 @@ class SignalingService {
           expiresAt: Date.now() + expiresIn * 1000,
         }
 
-        this.storage.setItem("omniconnect-session", JSON.stringify(sessionData))
+        this.storage.setItem("Omnars-session", JSON.stringify(sessionData))
         return sessionData
       } catch (error) {
         lastError = error instanceof Error ? error : new Error("Unknown error")
@@ -221,7 +221,7 @@ class SignalingService {
 
         if (error.message.includes("Invalid token") || error.message.includes("Authentication")) {
           this.session = null
-          this.storage.removeItem("omniconnect-session")
+          this.storage.removeItem("Omnars-session")
           clearTimeout(connectionTimeout)
           reject(new Error("Authentication failed - please refresh"))
         }
@@ -232,7 +232,7 @@ class SignalingService {
         if (reason === "io server disconnect") {
           // Server disconnected us, try to reconnect with new session
           this.session = null
-          this.storage.removeItem("omniconnect-session")
+          this.storage.removeItem("Omnars-session")
         }
       })
 
@@ -281,7 +281,7 @@ class SignalingService {
       // Handle auth errors from server
       this.socket.on("auth-error", () => {
         this.session = null
-        this.storage.removeItem("omniconnect-session")
+        this.storage.removeItem("Omnars-session")
         this.socket?.disconnect()
       })
     })

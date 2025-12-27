@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect } from "react"
 import type { DeveloperProfile } from "@/lib/developer-profile"
 import { createEmptyProfile } from "@/lib/developer-profile"
 
-const STORAGE_KEY = "omniconnect-profile"
+const STORAGE_KEY = "Omnars-profile"
 
 export function useProfile() {
   const [profile, setProfile] = useState<DeveloperProfile | null>(null)
@@ -20,11 +20,11 @@ export function useProfile() {
         setProfile(JSON.parse(stored))
       } catch {
         // Invalid stored data, create new profile
-        const userId = sessionStorage.getItem("omniconnect-user-id") || `user-${Date.now()}`
+        const userId = sessionStorage.getItem("Omnars-user-id") || `user-${Date.now()}`
         setProfile(createEmptyProfile(userId))
       }
     } else {
-      const userId = sessionStorage.getItem("omniconnect-user-id") || `user-${Date.now()}`
+      const userId = sessionStorage.getItem("Omnars-user-id") || `user-${Date.now()}`
       setProfile(createEmptyProfile(userId))
     }
     setIsLoading(false)
@@ -64,7 +64,7 @@ export function useProfile() {
   const clearProfile = useCallback(() => {
     if (typeof window !== "undefined") {
       localStorage.removeItem(STORAGE_KEY)
-      const userId = sessionStorage.getItem("omniconnect-user-id") || `user-${Date.now()}`
+      const userId = sessionStorage.getItem("Omnars-user-id") || `user-${Date.now()}`
       setProfile(createEmptyProfile(userId))
     }
   }, [])

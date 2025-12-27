@@ -23,7 +23,7 @@ export default function TermsPage() {
             {/* Intro */}
             <div className="space-y-4">
               <p className="text-lg leading-relaxed text-muted-foreground">
-                Welcome to OmniConnect. By accessing our platform, you agree to be bound by these Terms. 
+                Welcome to Omnars. By accessing our platform, you agree to be bound by these Terms. 
                 If you do not agree, you must stop using the service immediately.
               </p>
             </div>
@@ -32,7 +32,7 @@ export default function TermsPage() {
             <section className="space-y-4">
               <h2 className="text-2xl font-bold">1. The Service</h2>
               <p className="text-muted-foreground leading-relaxed">
-                OmniConnect provides a peer-to-peer connection utility for developers (the "Service"). 
+                Omnars provides a peer-to-peer connection utility for developers (the "Service"). 
                 We act solely as a detailed technical facilitator to establish WebRTC connections between users. 
                 We are not a publisher of user content and we do not knowingly participate in your conversations.
               </p>
@@ -57,7 +57,7 @@ export default function TermsPage() {
                  </h3>
                  <p className="text-sm text-foreground/80">
                     You agree that you are solely responsible for your interactions with other users. 
-                    OmniConnect does not conduct criminal background checks or verify the identity of its users. 
+                    Omnars does not conduct criminal background checks or verify the identity of its users. 
                     You act at your own risk.
                  </p>
               </div>
@@ -79,7 +79,7 @@ export default function TermsPage() {
                 4. "AS IS" Disclaimer
               </h2>
               <p className="text-muted-foreground leading-relaxed uppercase text-sm font-medium">
-                THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE". OMNICONNECT DISCLAIMS ALL WARRANTIES, WHETHER EXPRESS OR IMPLIED, 
+                THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE". Omnars DISCLAIMS ALL WARRANTIES, WHETHER EXPRESS OR IMPLIED, 
                 INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT. 
                 WE DO NOT GUARANTEE THAT THE SERVICE WILL BE SAFE, SECURE, OR ERROR-FREE.
               </p>
@@ -89,7 +89,7 @@ export default function TermsPage() {
             <section className="space-y-4">
               <h2 className="text-2xl font-bold">5. Limitation of Liability</h2>
               <p className="text-muted-foreground leading-relaxed">
-                TO THE MAXIMUM EXTENT PERMITTED BY LAW, OMNICONNECT SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, 
+                TO THE MAXIMUM EXTENT PERMITTED BY LAW, Omnars SHALL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, 
                 OR ANY LOSS OF PROFITS OR REVENUES, WHETHER INCURRED DIRECTLY OR INDIRECTLY, OR ANY LOSS OF DATA, USE, GOODWILL, OR OTHER INTANGIBLE LOSSES, 
                 RESULTING FROM (A) YOUR ACCESS TO OR USE OF OR INABILITY TO ACCESS OR USE THE SERVICE; (B) ANY CONDUCT OR CONTENT OF ANY THIRD PARTY ON THE SERVICE.
               </p>
@@ -102,7 +102,7 @@ export default function TermsPage() {
                 6. Indemnification
               </h2>
               <p className="text-muted-foreground leading-relaxed">
-                You agree to defend, indemnify, and hold harmless OmniConnect and its officers, directors, employees, and agents from and against any claims, 
+                You agree to defend, indemnify, and hold harmless Omnars and its officers, directors, employees, and agents from and against any claims, 
                 liabilities, damages, losses, and expenses, including reasonable legal and accounting fees, arising out of or in any way connected with your 
                 access to or use of the Service or your violation of these Terms.
               </p>
@@ -121,7 +121,7 @@ export default function TermsPage() {
              <section className="space-y-4">
               <h2 className="text-2xl font-bold">8. Governing Law</h2>
               <p className="text-muted-foreground leading-relaxed">
-                These Terms shall be governed by and construed in accordance with the laws of the jurisdiction in which OmniConnect operates, 
+                These Terms shall be governed by and construed in accordance with the laws of the jurisdiction in which Omnars operates, 
                 without regard to its conflict of law provisions.
               </p>
             </section>

@@ -125,7 +125,7 @@ export function ReportModal({ isOpen, onClose, peerId, roomId, onAutoDisconnect 
                     </div>
                     <div>
                       <h3 className="font-semibold">Report User</h3>
-                      <p className="text-sm text-muted-foreground">Help us keep OmniConnect safe</p>
+                      <p className="text-sm text-muted-foreground">Help us keep Omnars safe</p>
                     </div>
                   </div>
                   <Button variant="ghost" size="icon" onClick={onClose}>

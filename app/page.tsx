@@ -13,7 +13,7 @@ export default function HomePage() {
         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
         className="shrink-0 flex items-center justify-between px-6 py-5 md:px-12 lg:px-20 z-50"
       >
-        <span className="text-foreground font-bold tracking-tight text-lg">OmniConnect</span>
+        <span className="text-foreground font-bold tracking-tight text-lg">Omnars</span>
         <Link href="/app">
           <motion.button
             whileTap={{ scale: 0.98 }}
